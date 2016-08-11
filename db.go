@@ -17,10 +17,6 @@ type item struct {
 	rev  int64
 }
 
-//func (i item) String() string {
-//	return fmt.Sprintf("data:%q rev:%d", i.data, i.rev)
-//}
-
 type pair struct {
 	key   []byte
 	items []item
@@ -75,6 +71,14 @@ func (p *pair) find(rev int64) (item, int, bool) {
 		return p.items[i], i, true
 	}
 	return nilItem, -1, false
+}
+
+func (p *pair) revs() []int64 {
+	revs := make([]int64, len(p.items))
+	for _, item := range p.items {
+		revs = append(revs, item.rev)
+	}
+	return revs
 }
 
 type Txn struct {
@@ -202,7 +206,7 @@ func (t *Txn) Rollback() {
 	t.mu.Unlock()
 }
 
-func (db *DB) Get(key []byte, rev int64) ([]byte, int64) {
+func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	match := getPair(key)
 	defer putPair(match)
@@ -212,15 +216,15 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, int64) {
 		if rev > 0 {
 			item, _, found := p.find(rev)
 			if !found {
-				return nil, tree.rev
+				return nil, nil, tree.rev
 			}
-			return item.data, tree.rev
+			return item.data, p.revs(), tree.rev
 		}
 
 		item := p.last()
-		return item.data, tree.rev
+		return item.data, p.revs(), tree.rev
 	}
-	return nil, tree.rev
+	return nil, nil, tree.rev
 }
 
 type WalkFunc func(value []byte, rev int64) bool
