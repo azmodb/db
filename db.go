@@ -88,7 +88,7 @@ func (p *pair) find(rev int64) (item, int, bool) {
 }
 
 func (p *pair) revs() []int64 {
-	revs := make([]int64, len(p.items))
+	revs := make([]int64, 0, len(p.items))
 	for _, item := range p.items {
 		revs = append(revs, item.rev)
 	}
