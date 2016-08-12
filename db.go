@@ -212,7 +212,7 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 		item := p.last()
 		return item.data, p.revs(), tree.rev
 	}
-	return nil, nil, 0
+	return nil, nil, tree.rev
 }
 
 type Func func(value []byte, rev int64) bool
