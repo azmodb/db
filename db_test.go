@@ -86,6 +86,44 @@ func TestRangeGet(t *testing.T) {
 	}
 }
 
+func TestPutTombstone(t *testing.T) {
+	db := New()
+
+	txn := db.Txn()
+	txn.Put([]byte("k01"), []byte("v1.1"), false) // rev = 1
+	txn.Put([]byte("k01"), []byte("v1.2"), false) // rev = 2
+	txn.Put([]byte("k01"), []byte("v1.3"), false) // rev = 3
+	txn.Commit()
+
+	wantVal, wantRevs, wantRev := []byte("v1.3"), []int64{1, 2, 3}, int64(3)
+	val, revs, rev := db.Get([]byte("k01"), 0)
+	if !equals(val, wantVal) {
+		t.Fatalf("tombstone: expected value %q, got %q", wantVal, val)
+	}
+	if !reflect.DeepEqual(revs, wantRevs) {
+		t.Fatalf("tombstone: expected revisions %v, got %v", wantRevs, revs)
+	}
+	if rev != wantRev {
+		t.Fatalf("tombstone: expected revision %d, got %d", wantRev, rev)
+	}
+
+	txn = db.Txn()
+	txn.Put([]byte("k01"), []byte("v1.4"), true) // rev = 4
+	txn.Commit()
+
+	wantVal, wantRevs, wantRev = []byte("v1.4"), []int64{4}, int64(4)
+	val, revs, rev = db.Get([]byte("k01"), 0)
+	if !equals(val, wantVal) {
+		t.Fatalf("tombstone: expected value %q, got %q", wantVal, val)
+	}
+	if !reflect.DeepEqual(revs, wantRevs) {
+		t.Fatalf("tombstone: expected revisions %v, got %v", wantRevs, revs)
+	}
+	if rev != wantRev {
+		t.Fatalf("tombstone: expected revision %d, got %d", wantRev, rev)
+	}
+}
+
 func makeValues(count, sub int) [][]byte {
 	vals := make([][]byte, 0, count)
 	for i := 0; i < count; i++ {
