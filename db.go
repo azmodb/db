@@ -215,7 +215,7 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 	return nil, nil, tree.rev
 }
 
-type Func func(value []byte, rev int64) bool
+type Func func(key, value []byte, revs []int64, rev int64) bool
 
 func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
@@ -232,7 +232,7 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 		} else {
 			item = p.last()
 		}
-		return fn(item.data, item.rev)
+		return fn(p.key, item.data, p.revs(), tree.rev)
 	}
 
 	fromPair, toPair := getPair(from), getPair(to)

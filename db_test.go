@@ -10,7 +10,7 @@ import (
 func rangeAll(db *DB, from, to []byte, rev int64) ([]string, int64) {
 	var vals []string
 	i := 0
-	current := db.Range(from, to, rev, func(val []byte, rev int64) bool {
+	current := db.Range(from, to, rev, func(k, val []byte, revs []int64, rev int64) bool {
 		vals = append(vals, string(val))
 		i++
 		return false
@@ -197,7 +197,7 @@ func TestBasicInsertedGetRangeDelete(t *testing.T) {
 	}
 
 	i := 0
-	_ = db.Range(keys[0], maxKey, 0, func(val []byte, rev int64) bool {
+	_ = db.Range(keys[0], maxKey, 0, func(k, val []byte, revs []int64, rev int64) bool {
 		if i < count/4 {
 			if !equals(val, vals3[i]) {
 				t.Fatalf("get: expected value[3] %q, got %q", vals3[i], val)
@@ -227,7 +227,7 @@ func TestBasicInsertedGetRangeDelete(t *testing.T) {
 	txn.Commit()
 
 	i = count / 2
-	_ = db.Range(keys[0], maxKey, 0, func(val []byte, rev int64) bool {
+	_ = db.Range(keys[0], maxKey, 0, func(k, val []byte, revs []int64, rev int64) bool {
 		if !equals(val, vals1[i]) {
 			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], val)
 		}
