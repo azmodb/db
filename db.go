@@ -73,18 +73,24 @@ func (p *pair) last() item {
 
 var nilItem = item{}
 
-func (p *pair) find(rev int64) (item, int, bool) {
+func (p *pair) findByRev(rev int64) (item, bool) {
 	i := sort.Search(len(p.items), func(i int) bool {
 		return p.items[i].rev >= rev
 	})
 
-	if i >= len(p.items) {
-		return nilItem, -1, false
+	if i >= len(p.items) { // p.items[i] < rev
+		return p.items[i-1], true
 	}
-	if i >= 0 && p.items[i].rev == rev {
-		return p.items[i], i, true
+	if p.items[i].rev == rev {
+		return p.items[i], true
 	}
-	return nilItem, -1, false
+	if p.items[i].rev > rev {
+		if i == 0 {
+			return nilItem, false
+		}
+		return p.items[i-1], true
+	}
+	return nilItem, false
 }
 
 func (p *pair) revs() []int64 {
@@ -96,7 +102,6 @@ func (p *pair) revs() []int64 {
 }
 
 type Txn struct {
-	mu  sync.Mutex
 	txn *llrb.Txn
 	rev int64
 	db  *DB
@@ -104,57 +109,31 @@ type Txn struct {
 
 func (t *Txn) Put(key, value []byte, tombstone bool) int64 {
 	match := getPair(key)
-	t.mu.Lock()
-	defer func() {
-		t.mu.Unlock()
-		putPair(match)
-	}()
+	defer putPair(match)
 
 	t.rev++
 	if elem := t.txn.Get(match); elem != nil {
-		p := elem.(*pair).copy()
+		p := elem.(*pair).copy() // TODO: optimize, if tombstone
 		if tombstone {
 			p.items = []item{item{data: value, rev: t.rev}}
 		} else {
 			p.append(value, t.rev)
 		}
 		t.txn.Insert(p)
-		return t.rev
+	} else {
+		p := newPair(key, value, t.rev)
+		t.txn.Insert(p)
 	}
-
-	p := newPair(key, value, t.rev)
-	t.txn.Insert(p)
 	return t.rev
 }
 
-func (t *Txn) Delete(key []byte, rev int64) int64 {
+func (t *Txn) Delete(key []byte) int64 {
 	match := getPair(key)
-	t.mu.Lock()
-	defer func() {
-		t.mu.Unlock()
-		putPair(match)
-	}()
+	defer putPair(match)
 
-	t.rev++
 	if elem := t.txn.Get(match); elem != nil {
-		if rev > 0 {
-			p := elem.(*pair)
-			_, index, found := p.find(rev)
-			if !found {
-				return t.rev
-			}
-
-			p = p.copy()
-			p.items = p.items[index:]
-			if len(p.items) == 0 {
-				t.txn.Delete(p)
-			} else {
-				t.txn.Insert(p)
-			}
-			return t.rev
-		}
+		t.rev++
 		t.txn.Delete(match)
-		return t.rev
 	}
 	return t.rev
 }
@@ -188,15 +167,8 @@ func (db *DB) Txn() *Txn {
 	}
 }
 
-func (db *DB) Rev() int64 {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
-	return tree.rev
-}
-
 func (t *Txn) Commit() {
-	t.mu.Lock()
 	if t.db == nil || t.txn == nil { // already aborted or committed
-		t.mu.Unlock()
 		return
 	}
 
@@ -210,20 +182,16 @@ func (t *Txn) Commit() {
 	t.rev = 0
 	t.db.writer.Unlock() // release the writer lock
 	t.db = nil
-	t.mu.Unlock()
 }
 
 func (t *Txn) Rollback() {
-	t.mu.Lock()
 	if t.db == nil || t.txn == nil { // already aborted or committed
-		t.mu.Unlock()
 		return
 	}
 
 	t.txn = nil
 	t.db.writer.Unlock() // release the writer lock
 	t.db = nil
-	t.mu.Unlock()
 }
 
 func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
@@ -234,7 +202,7 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 	if elem := tree.root.Get(match); elem != nil {
 		p := elem.(*pair)
 		if rev > 0 {
-			item, _, found := p.find(rev)
+			item, found := p.findByRev(rev)
 			if !found {
 				return nil, nil, tree.rev
 			}
@@ -244,18 +212,27 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 		item := p.last()
 		return item.data, p.revs(), tree.rev
 	}
-	return nil, nil, tree.rev
+	return nil, nil, 0
 }
 
-type WalkFunc func(value []byte, revs []int64, rev int64) bool
+type Func func(value []byte, rev int64) bool
 
-func (db *DB) Range(from, to []byte, fn WalkFunc) int64 {
+func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 
 	f := func(elem llrb.Element) bool {
 		p := elem.(*pair)
-		item := p.last()
-		return fn(item.data, p.revs(), item.rev)
+		var item item
+		if rev > 0 {
+			var found bool
+			item, found = p.findByRev(rev)
+			if !found {
+				return false
+			}
+		} else {
+			item = p.last()
+		}
+		return fn(item.data, item.rev)
 	}
 
 	fromPair, toPair := getPair(from), getPair(to)
@@ -267,16 +244,8 @@ func (db *DB) Range(from, to []byte, fn WalkFunc) int64 {
 	return tree.rev
 }
 
-func (db *DB) Walk(fn WalkFunc) int64 {
+func (db *DB) Rev() int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
-
-	f := func(elem llrb.Element) bool {
-		p := elem.(*pair)
-		item := p.last()
-		return fn(item.data, p.revs(), item.rev)
-	}
-
-	tree.root.ForEach(f)
 	return tree.rev
 }
 

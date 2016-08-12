@@ -1,129 +1,199 @@
 package db
 
-import "testing"
+import (
+	"bytes"
+	"fmt"
+	"reflect"
+	"testing"
+)
 
-func TestItemFind(t *testing.T) {
-	p := &pair{
-		items: []item{
-			{[]byte("v1"), 1},
-			{[]byte("v2"), 3},
-			{[]byte("v3"), 5},
-			{[]byte("v4"), 7},
-		},
+func rangeAll(db *DB, from, to []byte, rev int64) ([]string, int64) {
+	var vals []string
+	i := 0
+	current := db.Range(from, to, rev, func(val []byte, rev int64) bool {
+		vals = append(vals, string(val))
+		i++
+		return false
+	})
+	return vals[:i], current
+}
+
+func getAll(db *DB, keys [][]byte, rev int64) []string {
+	var vals []string
+	i := 0
+	for _, key := range keys {
+		val, _, _ := db.Get(key, rev)
+		if val == nil {
+			continue
+		}
+		vals = append(vals, string(val))
+		i++
+	}
+	return vals[:i]
+}
+
+func TestRangeGet(t *testing.T) {
+	db := New()
+	txn := db.Txn()
+	keys := [][]byte{[]byte("k03"), []byte("k05"), []byte("k07"), []byte("k11")}
+	maxKey := []byte("k12")
+	vals := []string{"v3", "v5", "v7", "v11"}
+
+	for i, key := range keys { // revision [1 4]
+		txn.Put(key, []byte(vals[i]+".1"), false)
+	}
+	txn.Put(keys[1], []byte(vals[1]+".2"), false) // revision 5
+	txn.Put(keys[2], []byte(vals[2]+".2"), false) // revision 6
+	txn.Put(keys[2], []byte(vals[2]+".3"), false) // revision 7
+
+	txn.Commit()
+
+	tests := []struct {
+		rev  int64
+		want []string
+	}{
+		{rev: -1, want: []string{"v3.1", "v5.2", "v7.3", "v11.1"}},
+		{rev: 0, want: []string{"v3.1", "v5.2", "v7.3", "v11.1"}},
+
+		{rev: 1, want: []string{"v3.1"}},
+		{rev: 2, want: []string{"v3.1", "v5.1"}},
+		{rev: 3, want: []string{"v3.1", "v5.1", "v7.1"}},
+		{rev: 4, want: []string{"v3.1", "v5.1", "v7.1", "v11.1"}},
+
+		{rev: 5, want: []string{"v3.1", "v5.2", "v7.1", "v11.1"}},
+		{rev: 6, want: []string{"v3.1", "v5.2", "v7.2", "v11.1"}},
+		{rev: 7, want: []string{"v3.1", "v5.2", "v7.3", "v11.1"}},
+
+		{rev: 8, want: []string{"v3.1", "v5.2", "v7.3", "v11.1"}},
+		{rev: 42, want: []string{"v3.1", "v5.2", "v7.3", "v11.1"}},
 	}
 
-	item, index, found := p.find(1)
-	if string(item.data) != "v1" {
-		t.Fatalf("find item: expected value %q, got %q", "v1", item.data)
-	}
-	if index != 0 {
-		t.Fatalf("find item: expected item index %d, got %d", 0, index)
-	}
-	if found != true {
-		t.Fatalf("find item: item not found")
-	}
-
-	item, index, found = p.find(3)
-	if string(item.data) != "v2" {
-		t.Fatalf("find item: expected value %q, got %q", "v2", item.data)
-	}
-	if index != 1 {
-		t.Fatalf("find item: expected item index %d, got %d", 1, index)
-	}
-	if found != true {
-		t.Fatalf("find item: item not found")
+	for _, test := range tests {
+		got, rev := rangeAll(db, keys[0], maxKey, test.rev)
+		if !reflect.DeepEqual(test.want, got) {
+			t.Fatalf("range at revision %d: differ\n%#v\n%#v", test.rev, test.want, got)
+		}
+		if rev != 7 {
+			t.Fatalf("range at revision %d: expected revision %d, have %d", test.rev, rev)
+		}
 	}
 
-	item, index, found = p.find(7)
-	if string(item.data) != "v4" {
-		t.Fatalf("find item: expected value %q, got %q", "v4", item.data)
-	}
-	if index != 3 {
-		t.Fatalf("find item: expected item index %d, got %d", 3, index)
-	}
-	if found != true {
-		t.Fatalf("find item: item not found")
-	}
-
-	item, index, found = p.find(8)
-	if string(item.data) != "" {
-		t.Fatalf("find item: expected empty value, got %q", item.data)
-	}
-	if index != -1 {
-		t.Fatalf("find item: expected zero index, got %d", index)
-	}
-	if found != false {
-		t.Fatalf("find item: item found")
-	}
-
-	item, index, found = p.find(0)
-	if string(item.data) != "" {
-		t.Fatalf("find item: expected empty value, got %q", item.data)
-	}
-	if index != -1 {
-		t.Fatalf("find item: expected zero index, got %d", index)
-	}
-	if found != false {
-		t.Fatalf("find item: item found")
-	}
-
-	item, index, found = p.find(-1)
-	if string(item.data) != "" {
-		t.Fatalf("find item: expected empty value, got %q", item.data)
-	}
-	if index != -1 {
-		t.Fatalf("find item: expected zero index, got %d", index)
-	}
-	if found != false {
-		t.Fatalf("find item: item found")
+	for _, test := range tests {
+		got := getAll(db, keys, test.rev)
+		if !reflect.DeepEqual(test.want, got) {
+			t.Fatalf("get at revision %d: differ\n%#v\n%#v", test.rev, test.want, got)
+		}
 	}
 }
 
-/*
-	func TestBasic(t *testing.T) {
-		tree := New()
-		txn := tree.Txn()
+func makeValues(count, sub int) [][]byte {
+	vals := make([][]byte, 0, count)
+	for i := 0; i < count; i++ {
+		vals = append(vals, []byte(fmt.Sprintf("val-%.4d.%d", i, sub)))
+	}
+	return vals
+}
 
-		txn.Put([]byte("k1"), []byte("v1.1"))
+func makeKeys(count int) [][]byte {
+	keys := make([][]byte, 0, count)
+	for i := 0; i < count; i++ {
+		keys = append(keys, []byte(fmt.Sprintf("key-%.4d", i)))
+	}
+	return keys
+}
 
-		txn.Put([]byte("k2"), []byte("v2.1"))
-		txn.Put([]byte("k2"), []byte("v2.2"))
-		txn.Put([]byte("k2"), []byte("v2.3"))
-		txn.Put([]byte("k2"), []byte("v2.4"))
-		txn.Put([]byte("k2"), []byte("v2.5"))
+func makeKey(num int) []byte {
+	return []byte(fmt.Sprintf("key-%.4d", num))
+}
 
-		txn.Put([]byte("k3"), []byte("v3.1"))
-		txn.Put([]byte("k4"), []byte("v4.1"))
-		txn.Put([]byte("k5"), []byte("v5.1"))
+func equals(a, b []byte) bool { return bytes.Compare(a, b) == 0 }
 
-		txn.Commit()
+func TestBasicInsertedGetRangeDelete(t *testing.T) {
+	count := 100
+	keys, maxKey := makeKeys(count), makeKey(count+1)
+	vals1, vals2, vals3 := makeValues(count, 1), makeValues(count/2, 2), makeValues(count/4, 3)
 
-		fmt.Println(tree.Len(), tree.Rev())
+	db := New()
+	txn := db.Txn()
+	for i := 0; i < count; i++ {
+		txn.Put(keys[i], vals1[i], false)
+	}
+	for i := 0; i < count/2; i++ {
+		txn.Put(keys[i], vals2[i], false)
+	}
+	for i := 0; i < count/4; i++ {
+		txn.Put(keys[i], vals3[i], false)
+	}
+	txn.Commit()
 
-		value, _, rev := tree.Get([]byte("k2"), 0)
-		fmt.Println(string(value), rev)
+	wantRev := int64(count + count/2 + count/4)
+	for i := 0; i < count; i++ {
+		val, revs, rev := db.Get(keys[i], 0)
+		if rev != wantRev {
+			t.Fatalf("get: revision mismatch, expected %d, got %d", wantRev, rev)
+		}
+		if i < count/4 {
+			if !equals(val, vals3[i]) {
+				t.Fatalf("get: expected value[3] %q, got %q", vals3[i], val)
+			}
+			if len(revs) != 3 {
+				t.Fatalf("get: expected 3 revisions, have %d", len(revs))
+			}
+			continue
+		}
+		if i < count/2 {
+			if !equals(val, vals2[i]) {
+				t.Fatalf("get: expected value[2] %q, got %q", vals2[i], val)
+			}
+			if len(revs) != 2 {
+				t.Fatalf("get: expected 2 revisions, have %d", len(revs))
+			}
+			continue
+		}
+		if !equals(val, vals1[i]) {
+			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], val)
+		}
+		if len(revs) != 1 {
+			t.Fatalf("get: expected 1 revision, have %d", len(revs))
+		}
+	}
 
-		value, _, rev = tree.Get([]byte("k2"), 4)
-		fmt.Println(string(value), rev)
+	i := 0
+	_ = db.Range(keys[0], maxKey, 0, func(val []byte, rev int64) bool {
+		if i < count/4 {
+			if !equals(val, vals3[i]) {
+				t.Fatalf("get: expected value[3] %q, got %q", vals3[i], val)
+			}
+			i++
+			return false
+		}
+		if i < count/2 {
+			if !equals(val, vals2[i]) {
+				t.Fatalf("get: expected value[2] %q, got %q", vals2[i], val)
+			}
+			i++
+			return false
+		}
 
-		value, _, rev = tree.Get([]byte("k2"), 3)
-		fmt.Println(string(value), rev)
+		if !equals(val, vals1[i]) {
+			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], val)
+		}
+		i++
+		return false
+	})
 
-		value, _, rev = tree.Get([]byte("k2"), 2)
-		fmt.Println(string(value), rev)
+	txn = db.Txn()
+	for i := 0; i < count/2; i++ {
+		txn.Delete(keys[i])
+	}
+	txn.Commit()
 
-		txn = tree.Txn()
-
-		txn.Delete([]byte("k2"), 4)
-
-		txn.Commit()
-
-		value, _, rev = tree.Get([]byte("k2"), 4)
-		fmt.Println(string(value), rev)
-		/*
-			fmt.Println("---")
-			tree.Range([]byte("k1"), []byte("k6"), func(v []byte, rev int64) bool {
-				fmt.Println(string(v), rev)
-				return false
-			})
-*/
+	i = count / 2
+	_ = db.Range(keys[0], maxKey, 0, func(val []byte, rev int64) bool {
+		if !equals(val, vals1[i]) {
+			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], val)
+		}
+		i++
+		return false
+	})
+}
