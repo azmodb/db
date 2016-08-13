@@ -125,6 +125,14 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 		p = newPair(key, value, t.rev)
 		t.txn.Insert(p)
 	}
+
+	watchers, found := t.db.reg.get(key)
+	if found {
+		ev := Event{value: value, revs: p.revs(), rev: t.rev}
+		for _, w := range watchers {
+			w.send(ev)
+		}
+	}
 	return p.revs(), t.rev
 }
 
@@ -149,6 +157,8 @@ type tree struct {
 type DB struct {
 	writer sync.Mutex // exclusive writer lock
 	tree   unsafe.Pointer
+
+	reg *registry
 }
 
 func New() *DB {
@@ -157,6 +167,7 @@ func New() *DB {
 			root: &llrb.Tree{},
 			rev:  0,
 		}),
+		reg: newRegistry(),
 	}
 }
 
@@ -245,6 +256,11 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	}()
 	tree.root.Range(fromPair, toPair, f)
 	return tree.rev
+}
+
+func (db *DB) Watch(key []byte) (*Watcher, int64) {
+	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	return db.reg.put(key), tree.rev
 }
 
 func (db *DB) Rev() int64 {
