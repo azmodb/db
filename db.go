@@ -107,35 +107,38 @@ type Txn struct {
 	db  *DB
 }
 
-func (t *Txn) Put(key, value []byte, tombstone bool) int64 {
+func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
 
+	var p *pair
 	t.rev++
 	if elem := t.txn.Get(match); elem != nil {
-		p := elem.(*pair).copy() // TODO: optimize, if tombstone
-		if tombstone {
+		p = elem.(*pair).copy() // TODO: optimize, if tombstone
+		if ts {
 			p.items = []item{item{data: value, rev: t.rev}}
 		} else {
 			p.append(value, t.rev)
 		}
 		t.txn.Insert(p)
 	} else {
-		p := newPair(key, value, t.rev)
+		p = newPair(key, value, t.rev)
 		t.txn.Insert(p)
 	}
-	return t.rev
+	return p.revs(), t.rev
 }
 
-func (t *Txn) Delete(key []byte) int64 {
+func (t *Txn) Delete(key []byte) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
 
 	if elem := t.txn.Get(match); elem != nil {
+		p := elem.(*pair)
 		t.rev++
 		t.txn.Delete(match)
+		return p.revs(), t.rev
 	}
-	return t.rev
+	return nil, t.rev
 }
 
 type tree struct {
