@@ -128,7 +128,7 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 
 	watchers, found := t.db.reg.get(key)
 	if found {
-		ev := Event{value: value, revs: p.revs(), rev: t.rev}
+		ev := Event{Value: value, Revs: p.revs(), Rev: t.rev}
 		for _, w := range watchers {
 			w.send(ev)
 		}

@@ -54,14 +54,10 @@ func (w *Watcher) send(ev Event) {
 type watchers map[string]*Watcher
 
 type Event struct {
-	value []byte
-	revs  []int64
-	rev   int64
+	Value []byte
+	Revs  []int64
+	Rev   int64
 }
-
-func (e Event) Value() []byte { return e.value }
-func (e Event) Revs() []int64 { return e.revs }
-func (e Event) Rev() int64    { return e.rev }
 
 type registry struct {
 	mu  sync.RWMutex // protects following

@@ -32,10 +32,10 @@ func TestBasicWatcher(t *testing.T) {
 	<-donec
 
 	want := []Event{
-		{value: []byte("v2"), revs: []int64{1, 2}, rev: 2},
-		{value: []byte("v3"), revs: []int64{1, 2, 3}, rev: 3},
-		{value: []byte("v4"), revs: []int64{1, 2, 3, 4}, rev: 4},
-		{value: []byte("v5"), revs: []int64{1, 2, 3, 4, 5}, rev: 5},
+		{Value: []byte("v2"), Revs: []int64{1, 2}, Rev: 2},
+		{Value: []byte("v3"), Revs: []int64{1, 2, 3}, Rev: 3},
+		{Value: []byte("v4"), Revs: []int64{1, 2, 3, 4}, Rev: 4},
+		{Value: []byte("v5"), Revs: []int64{1, 2, 3, 4, 5}, Rev: 5},
 	}
 	if !reflect.DeepEqual(want, evs) {
 		t.Fatalf("basic watcher: expected events\n%#v\n%#v", want, evs)
