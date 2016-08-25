@@ -194,4 +194,6 @@ func TestBasicRegistry(t *testing.T) {
 		t.Fatalf("basic registry: expected map length %d, got %d",
 			2, len(reg.w))
 	}
+
+	reg.remove([]byte("xxx"), "xxx") // remove unknown watcher
 }
