@@ -1,9 +1,114 @@
 package db
 
 import (
+	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 )
+
+func TestWatcherShutdown(t *testing.T) {
+	db := New()
+
+	w, rev, err := db.Watch([]byte("k"))
+	if err == nil {
+		t.Fatalf("shutdown: expected non <nil> error, have %v", err)
+	}
+	if rev != 0 {
+		t.Fatalf("shutdown: expected revision 0, have %d", rev)
+	}
+	if w != nil {
+		t.Fatalf("shutdown: expected <nil> watcher, got %v", w)
+	}
+
+	txn := db.Txn()
+	txn.Put([]byte("k"), []byte("v1"), false)
+	txn.Commit()
+
+	w, rev, err = db.Watch([]byte("k"))
+	if err != nil {
+		t.Fatalf("shutdown: expected <nil> error, have %v", err)
+	}
+	if rev != 1 {
+		t.Fatalf("shutdown: expected revision 1, have %d", rev)
+	}
+
+	// send on opened watcher
+	w.send(Event{})
+	w.send(Event{})
+	w.send(Event{})
+
+	// close multiple times
+	w.Close()
+	w.Close()
+	w.Close()
+
+	// send on already closed watcher
+	w.send(Event{})
+	w.send(Event{})
+	w.send(Event{})
+}
+
+func TestBasicWatchers(t *testing.T) {
+	watcherCount := 12
+	db := New()
+	txn := db.Txn()
+	txn.Put([]byte("k"), []byte("v1"), false)
+	txn.Commit()
+
+	watchers := make([]*Watcher, 0, watcherCount)
+	donec := make(chan struct{}, watcherCount)
+
+	var mu sync.Mutex
+	events := make([][]Event, 0, watcherCount)
+
+	for i := 0; i < watcherCount; i++ {
+		w, _, _ := db.Watch([]byte("k"))
+		watchers = append(watchers, w)
+
+		evs := make([]Event, 0, 4)
+		events = append(events, evs)
+
+		go func(w *Watcher, i int, donec chan<- struct{}) {
+			for ev := range w.Recv() {
+				mu.Lock()
+				events[i] = append(events[i], ev)
+				mu.Unlock()
+			}
+			donec <- struct{}{}
+		}(w, i, donec)
+	}
+
+	txn = db.Txn()
+	txn.Put([]byte("k"), []byte("v2"), false)
+	txn.Put([]byte("k"), []byte("v3"), false)
+	txn.Put([]byte("k"), []byte("v4"), false)
+	txn.Put([]byte("k"), []byte("v5"), false)
+	txn.Commit()
+
+	for _, w := range watchers {
+		w.Close()
+	}
+	i := 0
+	for _ = range donec {
+		i++
+		if i >= watcherCount {
+			break
+		}
+	}
+
+	for i, evs := range events {
+		if len(evs) != 4 {
+			t.Fatalf("watcher #%d: expected 4 changes, got %d", i, len(evs))
+		}
+		for j := 2; j < 6; j++ {
+			v := fmt.Sprintf("v%d", j)
+			if string(evs[j-2].Value) != v {
+				t.Fatalf("watcher #%d: expected value %q, got %q", i, v, evs[j-2].Value)
+			}
+		}
+	}
+}
 
 func TestBasicWatcher(t *testing.T) {
 	db := New()
@@ -12,7 +117,7 @@ func TestBasicWatcher(t *testing.T) {
 	txn.Commit()
 
 	donec := make(chan struct{}, 1)
-	w, _ := db.Watch([]byte("k"))
+	w, _, _ := db.Watch([]byte("k"))
 	evs := make([]Event, 0, 4)
 	go func() {
 		for ev := range w.Recv() {

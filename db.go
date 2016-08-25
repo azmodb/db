@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"errors"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -258,9 +259,15 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	return tree.rev
 }
 
-func (db *DB) Watch(key []byte) (*Watcher, int64) {
+func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
-	return db.reg.put(key), tree.rev
+	match := getPair(key)
+	defer putPair(match)
+
+	if elem := tree.root.Get(match); elem != nil {
+		return db.reg.put(key), tree.rev, nil
+	}
+	return nil, tree.rev, errors.New("key not found")
 }
 
 func (db *DB) Rev() int64 {

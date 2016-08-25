@@ -32,6 +32,7 @@ func (w *Watcher) Close() {
 	}
 
 	w.reg.remove(w.key, w.id)
+	w.shutdown = true
 	close(w.ch)
 	w.mu.Unlock()
 }
