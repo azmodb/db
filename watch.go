@@ -25,6 +25,10 @@ func (w *Watcher) Recv() <-chan Event {
 }
 
 func (w *Watcher) Close() {
+	if w == nil {
+		return
+	}
+
 	w.mu.Lock()
 	if w.shutdown {
 		w.mu.Unlock()

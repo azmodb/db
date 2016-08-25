@@ -10,10 +10,7 @@ import (
 func TestWatcherShutdown(t *testing.T) {
 	db := New()
 
-	w, rev, err := db.Watch([]byte("k"))
-	if err == nil {
-		t.Fatalf("shutdown: expected non <nil> error, have %v", err)
-	}
+	w, rev := db.Watch([]byte("k"))
 	if rev != 0 {
 		t.Fatalf("shutdown: expected revision 0, have %d", rev)
 	}
@@ -21,14 +18,13 @@ func TestWatcherShutdown(t *testing.T) {
 		t.Fatalf("shutdown: expected <nil> watcher, got %v", w)
 	}
 
+	w.Close() // test close nil watcher
+
 	txn := db.Txn()
 	txn.Put([]byte("k"), []byte("v1"), false)
 	txn.Commit()
 
-	w, rev, err = db.Watch([]byte("k"))
-	if err != nil {
-		t.Fatalf("shutdown: expected <nil> error, have %v", err)
-	}
+	w, rev = db.Watch([]byte("k"))
 	if rev != 1 {
 		t.Fatalf("shutdown: expected revision 1, have %d", rev)
 	}
@@ -63,7 +59,7 @@ func TestBasicWatchers(t *testing.T) {
 	events := make([][]Event, 0, watcherCount)
 
 	for i := 0; i < watcherCount; i++ {
-		w, _, _ := db.Watch([]byte("k"))
+		w, _ := db.Watch([]byte("k"))
 		watchers = append(watchers, w)
 
 		evs := make([]Event, 0, 4)
@@ -117,7 +113,7 @@ func TestBasicWatcher(t *testing.T) {
 	txn.Commit()
 
 	donec := make(chan struct{}, 1)
-	w, _, _ := db.Watch([]byte("k"))
+	w, _ := db.Watch([]byte("k"))
 	evs := make([]Event, 0, 4)
 	go func() {
 		for ev := range w.Recv() {
