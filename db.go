@@ -101,12 +101,19 @@ func (p *pair) revs() []int64 {
 	return revs
 }
 
+// Txn represents a write-only transaction on the database.
 type Txn struct {
 	txn *llrb.Txn
 	rev int64
 	db  *DB
 }
 
+// Put sets the value for the key in the database. If the key exists a
+// new version will be created. Supplied key/value pair must not remain
+// valid.
+//
+// Put returns the previous revisions of the key/value pair if any and
+// the current revision of the database.
 func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -116,26 +123,33 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	if elem := t.txn.Get(match); elem != nil {
 		p = elem.(*pair).copy() // TODO: optimize, if tombstone
 		if ts {
-			p.items = []item{item{data: value, rev: t.rev}}
+			p.items = []item{item{data: bcopy(value), rev: t.rev}}
 		} else {
-			p.append(value, t.rev)
+			p.append(bcopy(value), t.rev)
 		}
 		t.txn.Insert(p)
 	} else {
-		p = newPair(key, value, t.rev)
+		p = newPair(bcopy(key), bcopy(value), t.rev)
 		t.txn.Insert(p)
 	}
 
+	// TODO: optimize
+	revs := p.revs()
 	watchers, found := t.db.reg.get(key)
 	if found {
-		ev := Event{Value: value, Revs: p.revs(), Rev: t.rev}
+		ev := Event{Value: value, Revs: revs, Rev: t.rev}
 		for _, w := range watchers {
 			w.send(ev)
 		}
 	}
-	return p.revs(), t.rev
+	return revs, t.rev
 }
 
+// Delete remove a key from the database. If the key does not exist then
+// nothing is done.
+//
+// Delete returns the previous revisions of the key/value pair if any
+// and the current revision of the database.
 func (t *Txn) Delete(key []byte) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -181,6 +195,8 @@ func (db *DB) Txn() *Txn {
 	}
 }
 
+// Commit closes the transaction and writes all changes into the
+// database.
 func (t *Txn) Commit() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -198,6 +214,7 @@ func (t *Txn) Commit() {
 	t.db = nil
 }
 
+// Rollback closes the transaction and ignores all previous updates.
 func (t *Txn) Rollback() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -269,12 +286,20 @@ func (db *DB) Watch(key []byte) (*Watcher, int64) {
 	return nil, tree.rev
 }
 
+// Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.rev
 }
 
+// Len returns the number of elemets in the database.
 func (db *DB) Len() int {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.root.Len()
+}
+
+func bcopy(src []byte) []byte {
+	dst := make([]byte, len(src))
+	copy(dst, src)
+	return dst
 }
