@@ -36,6 +36,7 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
 
+	// TODO: optimize value bcopy
 	var p *pair
 	t.rev++
 	if elem := t.txn.Get(match); elem != nil {
@@ -51,9 +52,8 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 		t.txn.Insert(p)
 	}
 
-	n, found := t.db.reg[string(key)]
-	if found {
-		n.notify(bcopy(value), p.revs())
+	if n, found := t.db.reg[string(key)]; found {
+		n.Notify(bcopy(value), p.revs())
 	}
 	return p.revs(), t.rev
 }
@@ -72,6 +72,10 @@ func (t *Txn) Delete(key []byte) ([]int64, int64) {
 		p := elem.(*pair)
 		t.rev++
 		t.txn.Delete(match)
+
+		if n, found := t.db.reg[string(key)]; found {
+			n.Shutdown()
+		}
 		return p.revs(), t.rev
 	}
 	return nil, t.rev
@@ -215,7 +219,7 @@ func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 			db.reg[string(key)] = n
 		}
 
-		watcher := n.create()
+		watcher := n.Create()
 		db.mu.Unlock()
 		return watcher, tree.rev, nil
 	}
