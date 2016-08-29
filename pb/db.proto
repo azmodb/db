@@ -1,0 +1,14 @@
+syntax = "proto3";
+package azmo.db;
+option go_package = "pb";
+
+message Value {
+	repeated int64 revisions = 1;
+	bytes value = 2;
+}
+
+message Row {
+	repeated int64 revisions = 1;
+	bytes key = 2;
+	bytes value = 3;
+}

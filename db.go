@@ -1,105 +1,22 @@
 package db
 
 import (
-	"bytes"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/azmodb/db/pb"
 	"github.com/azmodb/llrb"
 )
 
-var pairPool = sync.Pool{New: func() interface{} { return &pair{} }}
+const (
+	ErrRevisionNotFound = Error("revision not found")
+	ErrKeyNotFound      = Error("key not found")
+)
 
-type item struct {
-	data []byte
-	rev  int64
-}
+type Error string
 
-type pair struct {
-	key   []byte
-	items []item
-}
-
-func newPair(key []byte, value []byte, rev int64) *pair {
-	return &pair{
-		key:   key,
-		items: []item{item{data: value, rev: rev}},
-	}
-}
-
-func getPair(key []byte) *pair {
-	p := pairPool.Get().(*pair)
-	p.key = key
-	return p
-}
-
-func putPair(p *pair) {
-	p.key = nil
-	pairPool.Put(p)
-}
-
-// Compare implements llrb.Element.
-func (p *pair) Compare(elem llrb.Element) int {
-	return bytes.Compare(p.key, elem.(*pair).key)
-}
-
-func (p *pair) copy() *pair {
-	np := &pair{
-		key:   p.key,
-		items: make([]item, 0, len(p.items)),
-	}
-	for _, i := range p.items {
-		np.items = append(np.items, item{
-			data: i.data,
-			rev:  i.rev,
-		})
-	}
-	return np
-}
-
-func (p *pair) append(value []byte, rev int64) {
-	n := len(p.items)
-	items := make([]item, n+1)
-	copy(items, p.items)
-	items[n] = item{data: value, rev: rev}
-	p.items = items
-}
-
-func (p *pair) last() item {
-	return p.items[len(p.items)-1]
-}
-
-var nilItem = item{}
-
-func (p *pair) findByRev(rev int64) (item, bool) {
-	i := sort.Search(len(p.items), func(i int) bool {
-		return p.items[i].rev >= rev
-	})
-
-	if i >= len(p.items) { // p.items[i] < rev
-		return p.items[i-1], true
-	}
-	if p.items[i].rev == rev {
-		return p.items[i], true
-	}
-	if p.items[i].rev > rev {
-		if i == 0 {
-			return nilItem, false
-		}
-		return p.items[i-1], true
-	}
-	return nilItem, false
-}
-
-func (p *pair) revs() []int64 {
-	revs := make([]int64, 0, len(p.items))
-	for _, item := range p.items {
-		revs = append(revs, item.rev)
-	}
-	return revs
-}
+func (e Error) Error() string { return string(e) }
 
 // Txn represents a write-only transaction on the database.
 type Txn struct {
@@ -109,11 +26,12 @@ type Txn struct {
 }
 
 // Put sets the value for the key in the database. If the key exists a
-// new version will be created. Supplied key/value pair must not remain
-// valid.
+// new version will be created. Supplied key/value pair must remain
+// valid for the life of the transaction.
 //
 // Put returns the previous revisions of the key/value pair if any and
 // the current revision of the database.
+
 func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -133,16 +51,11 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 		t.txn.Insert(p)
 	}
 
-	// TODO: optimize
-	revs := p.revs()
-	watchers, found := t.db.reg.get(key)
+	n, found := t.db.reg[string(key)]
 	if found {
-		ev := Event{Value: value, Revs: revs, Rev: t.rev}
-		for _, w := range watchers {
-			w.send(ev)
-		}
+		n.notify(bcopy(value), p.revs())
 	}
-	return revs, t.rev
+	return p.revs(), t.rev
 }
 
 // Delete remove a key from the database. If the key does not exist then
@@ -150,6 +63,7 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 //
 // Delete returns the previous revisions of the key/value pair if any
 // and the current revision of the database.
+
 func (t *Txn) Delete(key []byte) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -169,10 +83,11 @@ type tree struct {
 }
 
 type DB struct {
-	writer sync.Mutex // exclusive writer lock
+	writer sync.Mutex // exclusive writer transaction
 	tree   unsafe.Pointer
 
-	reg *registry
+	mu  sync.Mutex // protects notifier registry
+	reg map[string]*notifier
 }
 
 func New() *DB {
@@ -181,7 +96,7 @@ func New() *DB {
 			root: &llrb.Tree{},
 			rev:  0,
 		}),
-		reg: newRegistry(),
+		reg: make(map[string]*notifier),
 	}
 }
 
@@ -197,6 +112,7 @@ func (db *DB) Txn() *Txn {
 
 // Commit closes the transaction and writes all changes into the
 // database.
+
 func (t *Txn) Commit() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -215,6 +131,7 @@ func (t *Txn) Commit() {
 }
 
 // Rollback closes the transaction and ignores all previous updates.
+
 func (t *Txn) Rollback() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -225,7 +142,7 @@ func (t *Txn) Rollback() {
 	t.db = nil
 }
 
-func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
+func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	match := getPair(key)
 	defer putPair(match)
@@ -235,18 +152,23 @@ func (db *DB) Get(key []byte, rev int64) ([]byte, []int64, int64) {
 		if rev > 0 {
 			item, found := p.findByRev(rev)
 			if !found {
-				return nil, nil, tree.rev
+				return nil, tree.rev, ErrRevisionNotFound
 			}
-			return item.data, p.revs(), tree.rev
+			return &pb.Value{
+				Value:     bcopy(item.data),
+				Revisions: p.revs(),
+			}, tree.rev, nil
 		}
 
-		item := p.last()
-		return item.data, p.revs(), tree.rev
+		return &pb.Value{
+			Value:     bcopy(p.last().data),
+			Revisions: p.revs(),
+		}, tree.rev, nil
 	}
-	return nil, nil, tree.rev
+	return nil, tree.rev, ErrKeyNotFound
 }
 
-type Func func(key, value []byte, revs []int64, rev int64) bool
+type Func func(row *pb.Row) bool
 
 func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
@@ -263,7 +185,12 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 		} else {
 			item = p.last()
 		}
-		return fn(p.key, item.data, p.revs(), tree.rev)
+
+		return fn(&pb.Row{
+			Key:       bcopy(p.key),
+			Value:     bcopy(item.data),
+			Revisions: p.revs(),
+		})
 	}
 
 	fromPair, toPair := getPair(from), getPair(to)
@@ -275,24 +202,35 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	return tree.rev
 }
 
-func (db *DB) Watch(key []byte) (*Watcher, int64) {
+func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	match := getPair(key)
 	defer putPair(match)
 
 	if elem := tree.root.Get(match); elem != nil {
-		return db.reg.put(key), tree.rev
+		db.mu.Lock()
+		n, found := db.reg[string(key)]
+		if !found {
+			n = newNotifier()
+			db.reg[string(key)] = n
+		}
+
+		watcher := n.create()
+		db.mu.Unlock()
+		return watcher, tree.rev, nil
 	}
-	return nil, tree.rev
+	return nil, tree.rev, ErrKeyNotFound
 }
 
 // Rev returns the current revision of the database.
+
 func (db *DB) Rev() int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.rev
 }
 
 // Len returns the number of elemets in the database.
+
 func (db *DB) Len() int {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.root.Len()
