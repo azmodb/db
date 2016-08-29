@@ -31,7 +31,6 @@ type Txn struct {
 //
 // Put returns the previous revisions of the key/value pair if any and
 // the current revision of the database.
-
 func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -63,7 +62,6 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 //
 // Delete returns the previous revisions of the key/value pair if any
 // and the current revision of the database.
-
 func (t *Txn) Delete(key []byte) ([]int64, int64) {
 	match := getPair(key)
 	defer putPair(match)
@@ -116,7 +114,6 @@ func (db *DB) Txn() *Txn {
 
 // Commit closes the transaction and writes all changes into the
 // database.
-
 func (t *Txn) Commit() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -135,7 +132,6 @@ func (t *Txn) Commit() {
 }
 
 // Rollback closes the transaction and ignores all previous updates.
-
 func (t *Txn) Rollback() {
 	if t.db == nil || t.txn == nil { // already aborted or committed
 		return
@@ -227,14 +223,12 @@ func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 }
 
 // Rev returns the current revision of the database.
-
 func (db *DB) Rev() int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.rev
 }
 
 // Len returns the number of elemets in the database.
-
 func (db *DB) Len() int {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.root.Len()
