@@ -168,7 +168,7 @@ func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
 	return nil, tree.rev, ErrKeyNotFound
 }
 
-type Func func(row *pb.Row) bool
+type Func func(pair *pb.Pair) bool
 
 func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
@@ -186,7 +186,7 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 			item = p.last()
 		}
 
-		return fn(&pb.Row{
+		return fn(&pb.Pair{
 			Key:       bcopy(p.key),
 			Value:     bcopy(item.data),
 			Revisions: p.revs(),

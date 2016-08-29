@@ -12,8 +12,8 @@ import (
 func rangeAll(db *DB, from, to []byte, rev int64) ([]string, int64) {
 	var vals []string
 	i := 0
-	current := db.Range(from, to, rev, func(row *pb.Row) bool {
-		vals = append(vals, string(row.Value))
+	current := db.Range(from, to, rev, func(pair *pb.Pair) bool {
+		vals = append(vals, string(pair.Value))
 		i++
 		return false
 	})
@@ -207,24 +207,24 @@ func TestBasicInsertedGetRangeDelete(t *testing.T) {
 	}
 
 	i := 0
-	_ = db.Range(keys[0], maxKey, 0, func(row *pb.Row) bool {
+	_ = db.Range(keys[0], maxKey, 0, func(pair *pb.Pair) bool {
 		if i < count/4 {
-			if !equals(row.Value, vals3[i]) {
-				t.Fatalf("get: expected value[3] %q, got %q", vals3[i], row.Value)
+			if !equals(pair.Value, vals3[i]) {
+				t.Fatalf("get: expected value[3] %q, got %q", vals3[i], pair.Value)
 			}
 			i++
 			return false
 		}
 		if i < count/2 {
-			if !equals(row.Value, vals2[i]) {
-				t.Fatalf("get: expected value[2] %q, got %q", vals2[i], row.Value)
+			if !equals(pair.Value, vals2[i]) {
+				t.Fatalf("get: expected value[2] %q, got %q", vals2[i], pair.Value)
 			}
 			i++
 			return false
 		}
 
-		if !equals(row.Value, vals1[i]) {
-			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], row.Value)
+		if !equals(pair.Value, vals1[i]) {
+			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], pair.Value)
 		}
 		i++
 		return false
@@ -237,9 +237,9 @@ func TestBasicInsertedGetRangeDelete(t *testing.T) {
 	txn.Commit()
 
 	i = count / 2
-	_ = db.Range(keys[0], maxKey, 0, func(row *pb.Row) bool {
-		if !equals(row.Value, vals1[i]) {
-			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], row.Value)
+	_ = db.Range(keys[0], maxKey, 0, func(pair *pb.Pair) bool {
+		if !equals(pair.Value, vals1[i]) {
+			t.Fatalf("get: expected value[1] %q, got %q", vals1[i], pair.Value)
 		}
 		i++
 		return false
