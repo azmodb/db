@@ -7,102 +7,103 @@ import (
 )
 
 type notifier struct {
-	m   map[int64]*Watcher // protected watcher registry
-	add chan *Watcher
-	del chan int64
-	id  int64
+	mu sync.Mutex // protects watchers
+	m  map[int64]*Watcher
+	id int64
 
-	inc chan *pb.Value // value to broadcast
-
-	done       chan struct{}
-	closed     chan struct{}
-	mu         sync.RWMutex // protects following
-	isShutdown bool
+	valc     chan *pb.Value
+	donec    chan struct{}
+	notifyc  chan struct{}
+	state    sync.Mutex
+	shutdown bool
 }
 
 func newNotifier() *notifier {
 	n := &notifier{
-		m:      make(map[int64]*Watcher),
-		add:    make(chan *Watcher),
-		del:    make(chan int64),
-		inc:    make(chan *pb.Value, 1),
-		done:   make(chan struct{}),
-		closed: make(chan struct{}),
+		m:       make(map[int64]*Watcher),
+		valc:    make(chan *pb.Value),
+		donec:   make(chan struct{}),
+		notifyc: make(chan struct{}),
 	}
 	go n.run()
 	return n
 }
 
-// notify broadcasts the value and revisions.
 func (n *notifier) Notify(value []byte, revs []int64) {
-	n.inc <- &pb.Value{Value: value, Revisions: revs}
+	n.state.Lock()
+	if n.shutdown {
+		n.state.Unlock()
+		return
+	}
+
+	n.valc <- &pb.Value{Value: value, Revisions: revs}
+	n.state.Unlock()
 }
 
-func (n *notifier) Shutdown() {
-	n.done <- struct{}{}
-	<-n.closed
+func (n *notifier) Close() {
+	n.state.Lock()
+	if n.shutdown {
+		n.state.Unlock()
+		return
+	}
+	n.shutdown = true
+	n.donec <- struct{}{}
+	<-n.notifyc
+	n.state.Unlock()
 }
 
-func (n *notifier) IsShutdown() bool {
-	n.mu.RLock()
-	shutdown := n.isShutdown
-	n.mu.RUnlock()
-	return shutdown
+func (n *notifier) Add() *Watcher {
+	n.state.Lock()
+	if n.shutdown {
+		panic("appending to already closed notifier")
+	}
+
+	n.mu.Lock()
+	n.id++
+	w := &Watcher{
+		ch: make(chan *pb.Value),
+		n:  n,
+		id: n.id,
+	}
+	n.m[n.id] = w
+	n.mu.Unlock()
+
+	n.state.Unlock()
+	return w
+}
+
+func (n *notifier) Delete(id int64) {
+	n.state.Lock()
+	if n.shutdown {
+		n.state.Unlock()
+		return
+	}
+	delete(n.m, id)
+	n.state.Unlock()
 }
 
 func (n *notifier) run() {
-	defer close(n.closed) // inform database we are done
-
 	for {
 		select {
-		case val := <-n.inc:
+		case val := <-n.valc:
+			n.mu.Lock()
 			for _, w := range n.m {
 				w.send(val)
 			}
-		case w := <-n.add:
-			if _, found := n.m[w.id]; found {
-				panic("duplicate watcher ID")
-			}
-			n.m[w.id] = w
-		case id := <-n.del:
-			delete(n.m, id)
-		case <-n.done:
-			for _, w := range n.m {
-				w.Close()
-			}
-			n.mu.Lock()
-			n.isShutdown = true
 			n.mu.Unlock()
+		case <-n.donec:
+			n.notifyc <- struct{}{}
 			return
 		}
 	}
 }
 
-// Create creates a new Watcher. create must be syncronized.
-func (n *notifier) Create() *Watcher {
-	n.id++
-	w := &Watcher{
-		ch: make(chan *pb.Value, 1),
-		id: n.id,
-		n:  n,
-	}
-
-	n.add <- w
-	return w
-}
-
-func (n *notifier) remove(id int64) {
-	n.del <- id
-}
-
 type Watcher struct {
-	ch chan *pb.Value
-	id int64
-
-	mu       sync.Mutex
+	ch       chan *pb.Value
+	id       int64
+	n        *notifier
+	state    sync.Mutex
 	shutdown bool
-
-	n *notifier
 }
 
 func (w *Watcher) Recv() <-chan *pb.Value {
@@ -110,31 +111,24 @@ func (w *Watcher) Recv() <-chan *pb.Value {
 }
 
 func (w *Watcher) send(val *pb.Value) {
-	w.mu.Lock()
-	if w.shutdown || w.n.IsShutdown() {
-		w.mu.Unlock()
-		return
-	}
-
-	if !w.n.IsShutdown() {
-		w.ch <- val
-	}
-	w.mu.Unlock()
-}
-
-func (w *Watcher) Close() {
-	w.mu.Lock()
+	w.state.Lock()
 	if w.shutdown {
-		w.mu.Unlock()
+		w.state.Unlock()
 		return
 	}
-
-	w.shutdown = true
-	close(w.ch)
-	if !w.n.IsShutdown() {
-		w.n.del <- w.id
-	}
-	w.mu.Unlock()
+	w.ch <- val
+	w.state.Unlock()
 }
 
 func (w *Watcher) ID() int64 { return w.id }
+
+func (w *Watcher) Close() {
+	w.state.Lock()
+	if w.shutdown {
+		w.state.Unlock()
+		return
+	}
+	w.shutdown = true
+	w.n.Delete(w.id)
+	w.state.Unlock()
+}

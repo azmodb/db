@@ -51,9 +51,12 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 		t.txn.Insert(p)
 	}
 
+	t.db.mu.RLock()
 	if n, found := t.db.reg[string(key)]; found {
 		n.Notify(bcopy(value), p.revs())
 	}
+	t.db.mu.RUnlock()
+
 	return p.revs(), t.rev
 }
 
@@ -71,9 +74,12 @@ func (t *Txn) Delete(key []byte) ([]int64, int64) {
 		t.rev++
 		t.txn.Delete(match)
 
+		t.db.mu.RLock()
 		if n, found := t.db.reg[string(key)]; found {
-			n.Shutdown()
+			n.Close()
 		}
+		t.db.mu.RUnlock()
+
 		return p.revs(), t.rev
 	}
 	return nil, t.rev
@@ -88,7 +94,7 @@ type DB struct {
 	writer sync.Mutex // exclusive writer transaction
 	tree   unsafe.Pointer
 
-	mu  sync.Mutex // protects notifier registry
+	mu  sync.RWMutex // protects notifier registry
 	reg map[string]*notifier
 }
 
@@ -215,8 +221,9 @@ func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 			db.reg[string(key)] = n
 		}
 
-		watcher := n.Create()
+		watcher := n.Add()
 		db.mu.Unlock()
+
 		return watcher, tree.rev, nil
 	}
 	return nil, tree.rev, ErrKeyNotFound
