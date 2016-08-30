@@ -10,10 +10,16 @@ import (
 )
 
 const (
+	// ErrRevisionNotFound means that a get call did not find the requested
+	// revision.
 	ErrRevisionNotFound = Error("revision not found")
-	ErrKeyNotFound      = Error("key not found")
+
+	// ErrKeyNotFound means that a get or watch call did not find the
+	// requested key.
+	ErrKeyNotFound = Error("key not found")
 )
 
+// Error represents a get or watch error.
 type Error string
 
 func (e Error) Error() string { return string(e) }
@@ -90,6 +96,7 @@ type tree struct {
 	rev  int64
 }
 
+// DB is a consistent and in-memory key/value store.
 type DB struct {
 	writer sync.Mutex // exclusive writer transaction
 	tree   unsafe.Pointer
@@ -98,6 +105,7 @@ type DB struct {
 	reg map[string]*notifier
 }
 
+// New returns a DB.
 func New() *DB {
 	return &DB{
 		tree: unsafe.Pointer(&tree{
@@ -108,6 +116,12 @@ func New() *DB {
 	}
 }
 
+// Txn starts a new transaction. One transaction can be used at a time.
+// Starting multiple transactions will cause the calls to block and be
+// serialized until the current transaction finishes. Transactions should
+// not be dependent on one another.
+//
+// You must commit or rollback transactions after you are finished!
 func (db *DB) Txn() *Txn {
 	db.writer.Lock()
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
@@ -148,6 +162,11 @@ func (t *Txn) Rollback() {
 	t.db = nil
 }
 
+// Get gets the value for the given key and revision. If revision <= 0
+// Get returns the last version.
+//
+// Get returns the current revision of the database. If there is an
+// error it will be of type ErrKeyNotFound of ErrRevisionNotFound.
 func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	match := getPair(key)
@@ -208,6 +227,10 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	return tree.rev
 }
 
+// Watch returns a new watcher for the give key and the current
+// revision of the database.
+//
+// If there is an error it will be of type ErrKeyNotFound.
 func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	match := getPair(key)
