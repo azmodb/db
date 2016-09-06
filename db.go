@@ -96,7 +96,7 @@ type tree struct {
 	rev  int64
 }
 
-// DB is a consistent and in-memory key/value store.
+// DB is a consistent in-memory key/value store.
 type DB struct {
 	writer sync.Mutex // exclusive writer transaction
 	tree   unsafe.Pointer
