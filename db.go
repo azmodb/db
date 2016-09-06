@@ -193,7 +193,10 @@ func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
 	return nil, tree.rev, ErrKeyNotFound
 }
 
-type Func func(pair *pb.Pair) bool
+// Func is a function that operates on a key range. If done is returned
+// true, the Func is indicating that no further work needs to be done
+// and so the traversal function should traverse no further.
+type Func func(pair *pb.Pair) (done bool)
 
 func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
