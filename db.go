@@ -35,9 +35,9 @@ type Txn struct {
 // new version will be created. Supplied key/value pair must remain
 // valid for the life of the transaction.
 //
-// Put returns the previous revisions of the key/value pair if any and
-// the current revision of the database.
-func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
+// Put returns the previous value and revisions of the key/value pair
+// if any and the current revision of the database.
+func (t *Txn) Put(key, value []byte, ts bool) (*pb.Value, int64) {
 	match := getPair(key)
 	defer putPair(match)
 
@@ -63,15 +63,18 @@ func (t *Txn) Put(key, value []byte, ts bool) ([]int64, int64) {
 	}
 	t.db.mu.RUnlock()
 
-	return p.revs(), t.rev
+	return &pb.Value{
+		Value:     value, // TODO: copy value here?
+		Revisions: p.revs(),
+	}, t.rev
 }
 
 // Delete remove a key from the database. If the key does not exist then
 // nothing is done.
 //
-// Delete returns the previous revisions of the key/value pair if any
-// and the current revision of the database.
-func (t *Txn) Delete(key []byte) ([]int64, int64) {
+// Delete returns the previous value and revisions of the key/value pair
+// if any and the current revision of the database.
+func (t *Txn) Delete(key []byte) (*pb.Value, int64) {
 	match := getPair(key)
 	defer putPair(match)
 
@@ -86,7 +89,10 @@ func (t *Txn) Delete(key []byte) ([]int64, int64) {
 		}
 		t.db.mu.RUnlock()
 
-		return p.revs(), t.rev
+		return &pb.Value{
+			Value:     bcopy(p.last().data),
+			Revisions: p.revs(),
+		}, t.rev
 	}
 	return nil, t.rev
 }
