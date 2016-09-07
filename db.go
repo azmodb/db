@@ -202,7 +202,7 @@ func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
 // Func is a function that operates on a key range. If done is returned
 // true, the Func is indicating that no further work needs to be done
 // and so the traversal function should traverse no further.
-type Func func(pair *pb.Pair) (done bool)
+type Func func(pair *pb.Pair, rev int64) (done bool)
 
 func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
@@ -224,7 +224,7 @@ func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
 			Key:       bcopy(p.key),
 			Value:     bcopy(item.data),
 			Revisions: p.revs(),
-		})
+		}, tree.rev)
 	}
 
 	fromPair, toPair := getPair(from), getPair(to)
