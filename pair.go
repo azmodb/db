@@ -2,6 +2,8 @@ package db
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"sort"
 	"sync"
 
@@ -97,4 +99,85 @@ func (p *pair) revs() []int64 {
 		revs = append(revs, item.rev)
 	}
 	return revs
+}
+
+func (p *pair) marshal(buf []byte) (n int) {
+	n = binary.PutUvarint(buf[0:], uint64(len(p.key)))
+	n += copy(buf[n:], p.key)
+	for _, item := range p.items {
+		n += binary.PutUvarint(buf[n:], uint64(len(item.data)))
+		n += copy(buf[n:], item.data)
+		n += binary.PutUvarint(buf[n:], uint64(item.rev))
+	}
+	return n
+}
+
+func (p *pair) unmarshal(buf []byte) error {
+	np := &pair{}
+	v, n, err := uvarint(buf[0:])
+	m := n + int(v)
+	if err != nil {
+		return err
+	}
+	np.key = bcopy(buf[n:m])
+
+	var rev uint64
+	var i int
+	for m < len(buf) {
+		v, n, err := uvarint(buf[m:])
+		m += n
+		if err != nil {
+			return err
+		}
+
+		item := item{}
+		item.data = bcopy(buf[m : m+int(v)])
+		m += int(v)
+
+		rev, n, err = uvarint(buf[m:])
+		if err != nil {
+			return err
+		}
+		m += n
+
+		item.rev = int64(rev)
+		np.items = append(np.items, item)
+		i++
+	}
+
+	np.items = np.items[:i]
+	*p = *np
+	return nil
+}
+
+func (p *pair) size() (n int) {
+	n += varintSize(uint64(len(p.key))) + len(p.key)
+	for _, item := range p.items {
+		n += varintSize(uint64(len(item.data)))
+		n += len(item.data)
+		n += varintSize(uint64(item.rev))
+	}
+	return n
+}
+
+func uvarint(buf []byte) (uint64, int, error) {
+	m, n := binary.Uvarint(buf)
+	switch {
+	case n < 0:
+		return 0, n, errors.New("value larger than 64 bits")
+	case n == 0:
+		return 0, n, errors.New("buffer too small")
+	}
+	return m, n, nil
+}
+
+func varintSize(v uint64) (n int) {
+	for {
+		n++
+		v >>= 7
+		if v == 0 {
+			break
+		}
+	}
+	return n
 }

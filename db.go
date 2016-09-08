@@ -102,6 +102,10 @@ type tree struct {
 	rev  int64
 }
 
+func newTree(rev int64) *tree {
+	return &tree{root: &llrb.Tree{}, rev: rev}
+}
+
 // DB is a consistent in-memory key/value store.
 type DB struct {
 	writer sync.Mutex // exclusive writer transaction
@@ -111,14 +115,11 @@ type DB struct {
 	reg map[string]*notifier
 }
 
-// New returns a DB.
+// New returns a consistent in-memory key/value store.
 func New() *DB {
 	return &DB{
-		tree: unsafe.Pointer(&tree{
-			root: &llrb.Tree{},
-			rev:  0,
-		}),
-		reg: make(map[string]*notifier),
+		tree: unsafe.Pointer(newTree(0)),
+		reg:  make(map[string]*notifier),
 	}
 }
 
