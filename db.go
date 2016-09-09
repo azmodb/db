@@ -1,3 +1,4 @@
+// Package db implements an immutable, consistent, in-memory key/value database.
 package db
 
 import (
@@ -10,6 +11,8 @@ import (
 )
 
 var valuePool = sync.Pool{New: func() interface{} { return &Value{&pb.Value{}} }}
+
+const maxPooledLen = 8192 // TODO: find better value
 
 // Value represents a read-only key/value database query result. The
 // caller must close the value when done with it.
@@ -36,10 +39,11 @@ func newValue(data interface{}, revs []int64) *Value {
 	return v
 }
 
-// Close closes the value, rendering it unusable.
+// Close closes the value, rendering it unusable. The caller must close
+// the value when done with it.
 func (v *Value) Close() {
-	if cap(v.Value.Data) > 8192 { // TODO
-		v.Value.Data = v.Value.Data[:8192]
+	if cap(v.Value.Data) > maxPooledLen {
+		v.Value.Data = v.Value.Data[0:0:maxPooledLen]
 	}
 	v.Value.Num = 0
 	v.Value.Revs = nil
@@ -57,7 +61,7 @@ func (v *Value) Bytes() []byte { return v.Value.Data }
 // Num returns 0.
 func (v *Value) Num() int64 { return v.Value.Num }
 
-// Revs() returns a revision numbers of this value.
+// Revs returns the revision numbers of this value.
 func (v *Value) Revs() []int64 { return v.Value.Revs }
 
 type DB struct {
