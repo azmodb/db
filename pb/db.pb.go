@@ -28,10 +28,16 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
+// Value represents the key/value database key query result.
 type Value struct {
+	// Revs represents all revision numbers of this value.
 	Revs []int64 `protobuf:"varint,1,rep,packed,name=revs" json:"revs,omitempty"`
-	Data []byte  `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	Num  int64   `protobuf:"varint,3,opt,name=num" json:"num,omitempty"`
+	// Data represents the byte slice value if Value is of
+	// bytes type.
+	Data []byte `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	// Num represents the numeric value if Value is of
+	// type numeric.
+	Num int64 `protobuf:"varint,3,opt,name=num" json:"num,omitempty"`
 }
 
 func (m *Value) Reset()                    { *m = Value{} }
