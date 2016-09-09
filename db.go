@@ -62,10 +62,21 @@ type tree struct {
 }
 
 // New returns a consistent in-memory key/value database.
-func New() *DB {
-	return &DB{
-		tree: unsafe.Pointer(&tree{root: &llrb.Tree{}}),
+func New() *DB { return newDB(nil) }
+
+func newDB(t *tree) *DB {
+	if t == nil {
+		t = &tree{root: &llrb.Tree{}}
 	}
+	return &DB{tree: unsafe.Pointer(t)}
+}
+
+func (db *DB) store(t *tree) {
+	atomic.StorePointer(&db.tree, unsafe.Pointer(t))
+}
+
+func (db *DB) load() *tree {
+	return (*tree)(atomic.LoadPointer(&db.tree))
 }
 
 type RangeFunc func(key []byte, value *Value, rev int64) (done bool)
@@ -105,13 +116,13 @@ func (db *DB) Range(from, to []byte, rev int64, fn RangeFunc) int64 {
 		toMatch.Close()
 	}()
 
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree := db.load()
 	tree.root.Range(fromMatch, toMatch, rangeFunc(rev, fn))
 	return tree.rev
 }
 
 func (db *DB) Get(key []byte, rev int64) (*Value, int64) {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree := db.load()
 	match := newMatcher(key)
 	defer match.Close()
 
@@ -132,19 +143,19 @@ func (db *DB) Get(key []byte, rev int64) (*Value, int64) {
 
 func (db *DB) Next() *Batch {
 	db.writer.Lock()
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree := db.load()
 	return &Batch{txn: tree.root.Txn(), rev: tree.rev, db: db}
 }
 
 // Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree := db.load()
 	return tree.rev
 }
 
 // len returns the number of keys in the database. only usefull for unit
 // testing.
 func (db *DB) len() int {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree := db.load()
 	return tree.root.Len()
 }

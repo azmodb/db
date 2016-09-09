@@ -1,11 +1,6 @@
 package db
 
-import (
-	"sync/atomic"
-	"unsafe"
-
-	"github.com/azmodb/llrb"
-)
+import "github.com/azmodb/llrb"
 
 type Batch struct {
 	txn *llrb.Txn
@@ -117,7 +112,7 @@ func (b *Batch) Commit() {
 	}
 
 	tree := &tree{root: b.txn.Commit(), rev: b.rev}
-	atomic.StorePointer(&b.db.tree, unsafe.Pointer(tree))
+	b.db.store(tree)
 	b.txn = nil
 	b.rev = 0
 	b.db.writer.Unlock() // release the writer lock

@@ -7,8 +7,6 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
-	"sync/atomic"
-	"unsafe"
 
 	"github.com/azmodb/llrb"
 )
@@ -128,10 +126,9 @@ func (s *Snapshotter) readPair(r io.Reader) (*pair, int64, error) {
 }
 
 func (db *DB) Snapshot() *Snapshotter {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return &Snapshotter{
 		data: make([]byte, 32*1024),
-		tree: tree,
+		tree: db.load(),
 	}
 }
 
@@ -182,7 +179,7 @@ func ReadFrom(r io.Reader) (db *DB, n int64, err error) {
 	s.tree.root = txn.Commit()
 	n += off
 
-	return &DB{tree: unsafe.Pointer(s.tree)}, n, err
+	return newDB(s.tree), n, err
 }
 
 func (s *Snapshotter) grow(size int) {
