@@ -79,68 +79,6 @@ func (db *DB) load() *tree {
 	return (*tree)(atomic.LoadPointer(&db.tree))
 }
 
-type RangeFunc func(key []byte, value *Value, rev int64) (done bool)
-
-func rangeFunc(wantRev int64, fn RangeFunc) llrb.Visitor {
-	return func(elem llrb.Element) bool {
-		var data interface{}
-		var rev int64
-		p := elem.(*pair)
-
-		if wantRev > 0 {
-			// TODO: find does not work here, need p.smallerThan(wantRev)
-			/*
-				var found bool
-				data, rev, found = p.find(wantRev)
-				if !found {
-					return false
-				}
-			*/
-		} else {
-			data, rev = p.last()
-		}
-		switch t := data.(type) { // we need to copy the key here
-		case []byte:
-			return fn(bcopy(p.key), newValue(t, p.revs()), rev)
-		case int64:
-			return fn(bcopy(p.key), newValue(t, p.revs()), rev)
-		}
-		panic("invalid value type")
-	}
-}
-
-func (db *DB) Range(from, to []byte, rev int64, fn RangeFunc) int64 {
-	fromMatch, toMatch := newMatcher(from), newMatcher(to)
-	defer func() {
-		fromMatch.Close()
-		toMatch.Close()
-	}()
-
-	tree := db.load()
-	tree.root.Range(fromMatch, toMatch, rangeFunc(rev, fn))
-	return tree.rev
-}
-
-func (db *DB) Get(key []byte, rev int64) (*Value, int64) {
-	tree := db.load()
-	match := newMatcher(key)
-	defer match.Close()
-
-	if elem := tree.root.Get(match); elem != nil {
-		p := elem.(*pair)
-		if rev > 0 {
-			data, _, found := p.find(rev)
-			if !found {
-				return nil, tree.rev // revision not found
-			}
-			return newValue(data, p.revs()), tree.rev
-		}
-		data, _ := p.last()
-		return newValue(data, p.revs()), tree.rev
-	}
-	return nil, tree.rev // key not found
-}
-
 func (db *DB) Next() *Batch {
 	db.writer.Lock()
 	tree := db.load()

@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -168,4 +169,34 @@ func TestGetValueType(t *testing.T) {
 
 	val, _ = db.Get([]byte("n1"), 8)
 	test(val, true, int64(3))
+}
+
+func TestBasicRange(t *testing.T) {
+	db := New()
+	b := db.Next()
+	b.Increment([]byte("k1"), 1, false)
+	b.Increment([]byte("k1"), 1, false)
+	b.Increment([]byte("k1"), 1, false)
+
+	b.Insert([]byte("k2"), []byte("v2.1"), false)
+	b.Insert([]byte("k2"), []byte("v2.2"), false)
+	b.Insert([]byte("k2"), []byte("v2.3"), false)
+
+	b.Insert([]byte("k3"), []byte("v3.1"), false)
+	b.Commit()
+
+	printer := func(k []byte, v *Value, rev int64) bool {
+		fmt.Println(string(k), v, rev)
+		return false
+	}
+	db.Range(nil, nil, 0, printer)
+	fmt.Println("-----")
+	db.Range(nil, []byte("k3"), 0, printer)
+	fmt.Println("-----")
+	db.Range([]byte("k3"), []byte("k1"), 0, printer)
+	fmt.Println("-----")
+	db.Range([]byte("k1"), []byte("k3"), 0, printer)
+	fmt.Println("-----")
+	//db.Range([]byte("k1"), []byte("k1"), 0, printer)
+	//fmt.Println("-----")
 }
