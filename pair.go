@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"sort"
 	"sync"
@@ -9,27 +10,24 @@ import (
 	"github.com/azmodb/llrb"
 )
 
-var pairPool = sync.Pool{New: func() interface{} { return &pair{} }}
-
-// matcher represents a key search query.
-type matcher interface {
-	llrb.Element
-	Close()
-}
-
+// item represents an internal immutable value. value interface can be of
+// type []byte or int64.
 type item struct {
 	value interface{}
 	rev   int64
 }
 
+// pair represents an internal immutable key/value pair.
 type pair struct {
 	key   []byte
 	items []item
 }
 
-// newPair creates a new internal key/value pair. newPair creates a copy
-// of the key. If value is of type []byte newPair creates a copy of the
-// value byte slice.
+var matcherPool = sync.Pool{New: func() interface{} { return &pair{} }}
+
+// newPair creates a new internal immutable key/value pair. newPair
+// creates a copy of the key. If value is of type []byte newPair
+// creates a copy of the value byte slice.
 //
 // If value is not of type []byte or int64 newPair will panic.
 func newPair(key []byte, value interface{}, rev int64) *pair {
@@ -45,18 +43,24 @@ func newPair(key []byte, value interface{}, rev int64) *pair {
 	return p
 }
 
+// matcher represents a key search query.
+type matcher interface {
+	llrb.Element
+	Close()
+}
+
 // newMatcher returns a new matcher to be used as get and range query
 // parameter.
 func newMatcher(key []byte) matcher {
-	p := pairPool.Get().(*pair)
+	p := matcherPool.Get().(*pair)
 	p.key = key
 	return p
 }
 
-// Close implementes matcher interface.
+// Close implementes the matcher interface.
 func (p *pair) Close() {
 	p.key = nil
-	pairPool.Put(p)
+	matcherPool.Put(p)
 }
 
 // append appends a single item. Updates should rarely happen more than
@@ -85,6 +89,7 @@ func (p *pair) tombstone(value []byte, rev int64) {
 	p.items[0] = v
 }
 
+// increment increments the underlying numeric value.
 func (p *pair) increment(value int64, rev int64) {
 	v := p.items[0]
 
@@ -99,8 +104,12 @@ func (p *pair) last() (interface{}, int64) {
 	return v.value, v.rev
 }
 
-// find returns the value and revision at revision. find returns false
-// if the revision does not exists.
+// find returns the value and revision at revision. If strict is true
+// the given rev must match a revision of the pair.
+// If strict is false and the pair contains a revision greater of equal
+// than rev find returns the most current data and revision.
+//
+// find returns false if the revision does not exists.
 func (p *pair) find(rev int64, strict bool) (interface{}, int64, bool) {
 	i := sort.Search(len(p.items), func(i int) bool {
 		return p.items[i].rev >= rev
@@ -176,9 +185,14 @@ const (
 	valueType   byte = 2
 )
 
+// bytes slice encoding (bytes) = uvarint64 length + content
+//
+// key (bytes) |
+
 func (p *pair) marshal(buf []byte) (n int) {
 	n = putUvarint(buf[0:], len(p.key))
 	n += copy(buf[n:], p.key)
+	n += putUvarint(buf[n:], len(p.items))
 
 	for _, item := range p.items {
 		switch t := item.value.(type) {
@@ -201,6 +215,8 @@ func (p *pair) marshal(buf []byte) (n int) {
 
 func (p *pair) size() (n int) {
 	n += uvarintSize(uint64(len(p.key))) + len(p.key)
+	n += uvarintSize(uint64(len(p.items)))
+
 	for _, item := range p.items {
 		switch t := item.value.(type) {
 		case []byte:
@@ -217,14 +233,20 @@ func (p *pair) size() (n int) {
 
 func (p *pair) unmarshal(buf []byte) error {
 	np := &pair{}
-	v, n, err := uvarint(buf[0:]) // unmarshal pair key
+	v, n, err := uvarint(buf[0:]) // unmarshal pair key bytes
 	m := n + int(v)
 	if err != nil {
 		return err
 	}
 	np.key = bcopy(buf[n:m])
 
-	var i int
+	v, n, err = uvarint(buf[m:]) // unmarshal items count
+	m += n
+	if err != nil {
+		return err
+	}
+	np.items = make([]item, 0, v) // TODO: overflow
+
 	for m < len(buf) {
 		typ := buf[m]
 		m++
@@ -234,19 +256,19 @@ func (p *pair) unmarshal(buf []byte) error {
 		if err != nil {
 			return err
 		}
-		item := item{}
 
+		var value interface{}
 		switch {
 		case typ == valueType:
-			item.value = bcopy(buf[m : m+int(v)])
+			value = bcopy(buf[m : m+int(v)])
 			m += int(v)
 		case typ == numericType:
 			if v > math.MaxInt64 {
-				return perror("unmarshal: malformed item")
+				return errors.New("unmarshal: malformed item")
 			}
-			item.value = int64(v)
+			value = int64(v)
 		default:
-			return perror("unmarshal: invalid item type")
+			return errors.New("unmarshal: invalid item type")
 		}
 
 		rev, n, err := uvarint(buf[m:])
@@ -255,19 +277,15 @@ func (p *pair) unmarshal(buf []byte) error {
 		}
 		m += n
 
-		item.rev = int64(rev)
-		np.items = append(np.items, item)
-		i++
+		np.items = append(np.items, item{value, int64(rev)})
+	}
+	if len(np.items) != cap(np.items) {
+		return errors.New("unmarshal: malformed pair")
 	}
 
-	np.items = np.items[:i]
 	*p = *np
 	return nil
 }
-
-type perror string
-
-func (e perror) Error() string { return string(e) }
 
 func bcopy(src []byte) []byte {
 	dst := make([]byte, len(src))
