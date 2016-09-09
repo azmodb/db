@@ -2,12 +2,11 @@ package db
 
 import (
 	"bytes"
-	"fmt"
 	"reflect"
 	"testing"
 )
 
-func TestDBGetRevision(t *testing.T) {
+func TestDBGetStrictRevision(t *testing.T) {
 	test := func(val *Value, wantVal []byte, rev, wantRev int64, wantRevs []int64) {
 		if rev != wantRev {
 			t.Fatalf("get: expected revision %d, have %d", wantRev, rev)
@@ -38,31 +37,31 @@ func TestDBGetRevision(t *testing.T) {
 
 	wantRevs := []int64{1, 2, 3, 5, 6}
 
-	val, rev := db.Get([]byte("k1"), 0)
+	val, rev := db.Get([]byte("k1"), 0, true)
 	test(val, []byte("v1.5"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), -1)
+	val, rev = db.Get([]byte("k1"), -1, true)
 	test(val, []byte("v1.5"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 1)
+	val, rev = db.Get([]byte("k1"), 1, true)
 	test(val, []byte("v1.1"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 2)
+	val, rev = db.Get([]byte("k1"), 2, true)
 	test(val, []byte("v1.2"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 3)
+	val, rev = db.Get([]byte("k1"), 3, true)
 	test(val, []byte("v1.3"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 5)
+	val, rev = db.Get([]byte("k1"), 5, true)
 	test(val, []byte("v1.4"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 6)
+	val, rev = db.Get([]byte("k1"), 6, true)
 	test(val, []byte("v1.5"), rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 4)
+	val, rev = db.Get([]byte("k1"), 4, true)
 	test(val, nil, rev, 6, wantRevs)
 
-	val, rev = db.Get([]byte("k1"), 7)
+	val, rev = db.Get([]byte("k1"), 7, true)
 	test(val, nil, rev, 6, wantRevs)
 }
 
@@ -89,22 +88,22 @@ func TestDBGet(t *testing.T) {
 	b.Insert([]byte("k4"), []byte("v4"), false)
 	b.Commit()
 
-	val, rev := db.Get([]byte("k1"), 0)
+	val, rev := db.Get([]byte("k1"), 0, true)
 	test(val, []byte("v1"), rev, 3)
 
-	val, rev = db.Get([]byte("k2"), 0)
+	val, rev = db.Get([]byte("k2"), 0, true)
 	test(val, []byte("v2"), rev, 3)
 
-	val, rev = db.Get([]byte("k4"), 0)
+	val, rev = db.Get([]byte("k4"), 0, true)
 	test(val, []byte("v4"), rev, 3)
 
-	val, rev = db.Get([]byte("k0"), 0)
+	val, rev = db.Get([]byte("k0"), 0, true)
 	test(val, nil, rev, 3)
 
-	val, rev = db.Get([]byte("k3"), 0)
+	val, rev = db.Get([]byte("k3"), 0, true)
 	test(val, nil, rev, 3)
 
-	val, rev = db.Get([]byte("k5"), 0)
+	val, rev = db.Get([]byte("k5"), 0, true)
 	test(val, nil, rev, 3)
 }
 
@@ -146,31 +145,32 @@ func TestGetValueType(t *testing.T) {
 	b.Increment([]byte("n2"), 5, false)
 	b.Commit()
 
-	val, _ := db.Get([]byte("k1"), 0)
+	val, _ := db.Get([]byte("k1"), 0, true)
 	test(val, false, []byte("v1.2"))
 
-	val, _ = db.Get([]byte("k1"), 2)
+	val, _ = db.Get([]byte("k1"), 2, true)
 	test(val, false, []byte("v1.2"))
 
-	val, _ = db.Get([]byte("k1"), 1)
+	val, _ = db.Get([]byte("k1"), 1, true)
 	test(val, false, []byte("v1.1"))
 
-	val, _ = db.Get([]byte("n1"), 0)
+	val, _ = db.Get([]byte("n1"), 0, true)
 	test(val, true, int64(3))
 
-	val, _ = db.Get([]byte("n2"), 0)
+	val, _ = db.Get([]byte("n2"), 0, true)
 	test(val, true, int64(5))
 
-	val, _ = db.Get([]byte("n1"), 7)
+	val, _ = db.Get([]byte("n1"), 7, true)
 	test(val, true, nil)
 
-	val, _ = db.Get([]byte("n1"), 9)
+	val, _ = db.Get([]byte("n1"), 9, true)
 	test(val, true, nil)
 
-	val, _ = db.Get([]byte("n1"), 8)
+	val, _ = db.Get([]byte("n1"), 8, true)
 	test(val, true, int64(3))
 }
 
+/*
 func TestBasicRange(t *testing.T) {
 	db := New()
 	b := db.Next()
@@ -200,3 +200,4 @@ func TestBasicRange(t *testing.T) {
 	//db.Range([]byte("k1"), []byte("k1"), 0, printer)
 	//fmt.Println("-----")
 }
+*/

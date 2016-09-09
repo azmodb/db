@@ -100,15 +100,14 @@ func (p *pair) last() (interface{}, int64) {
 
 // find returns the value and revision at revision. find returns false
 // if the revision does not exists.
-func (p *pair) find(rev int64) (interface{}, int64, bool) {
+func (p *pair) find(rev int64, strict bool) (interface{}, int64, bool) {
 	i := sort.Search(len(p.items), func(i int) bool {
 		return p.items[i].rev >= rev
 	})
 
 	if i == 0 && len(p.items) > 0 {
-		v := p.items[0]
-		if v.rev == rev {
-			return v.value, v.rev, true
+		if item, found := p.isValid(0, rev, strict); found {
+			return item.value, item.rev, true
 		}
 		return nil, 0, false
 	}
@@ -117,11 +116,24 @@ func (p *pair) find(rev int64) (interface{}, int64, bool) {
 		return nil, 0, false
 	}
 
-	if p.items[i].rev == rev {
-		v := p.items[i]
-		return v.value, v.rev, true
+	if item, found := p.isValid(i, rev, strict); found {
+		return item.value, item.rev, true
 	}
 	return nil, 0, false
+}
+
+var nilItem = item{}
+
+func (p *pair) isValid(index int, rev int64, strict bool) (item, bool) {
+	if !strict {
+		return p.items[len(p.items)-1], true
+	} else {
+		v := p.items[index]
+		if v.rev == rev {
+			return v, true
+		}
+	}
+	return nilItem, false
 }
 
 // Compare implements llrb.Element.

@@ -43,7 +43,6 @@ func TestPairAppendAndTombstone(t *testing.T) {
 	test(p, []byte("v6"), 15, 1, []int64{15})
 }
 
-/*
 func TestPairFindByRevision(t *testing.T) {
 	testNil := func(data interface{}, rev int64, found bool) {
 		if data != nil || rev != 0 {
@@ -53,8 +52,8 @@ func TestPairFindByRevision(t *testing.T) {
 			t.Fatalf("pair: should not find %v", data)
 		}
 	}
-	test := func(data interface{}, rev int64, found bool, wantVal, wantRev int64) {
-		if data.(int64) != wantVal || rev != wantRev {
+	test := func(data interface{}, rev int64, found bool, wantVal []byte, wantRev int64) {
+		if bytes.Compare(data.([]byte), wantVal) != 0 || rev != wantRev {
 			t.Fatalf("pair: expected data %v and rev %d, have %v %d",
 				wantVal, wantRev, data, rev)
 		}
@@ -63,39 +62,35 @@ func TestPairFindByRevision(t *testing.T) {
 		}
 	}
 
-	p := newPair([]byte("k"), int64(101), 10)
-	p.increment(int64(1), 11)
-	p.increment(int64(1), 12)
-	p.increment(int64(1), 16)
+	p := newPair([]byte("k"), []byte("v1"), 10)
+	p.append([]byte("v2"), 11)
+	p.append([]byte("v3"), 12)
+	p.append([]byte("v4"), 16)
+	p.append([]byte("v5"), 17)
 
-	data, rev, found := p.find(99)
-	testNil(data, rev, found)
+	for _, num := range []int64{99, 9, 13, 14, 15, 18, -1, 0} {
+		data, rev, found := p.find(num, true)
+		testNil(data, rev, found)
+	}
+	for _, num := range []int64{99, 18} {
+		data, rev, found := p.find(num, true)
+		testNil(data, rev, found)
+	}
 
-	data, rev, found = p.find(9)
-	testNil(data, rev, found)
+	data, rev, found := p.find(10, true)
+	test(data, rev, found, []byte("v1"), 10)
+	data, rev, found = p.find(11, true)
+	test(data, rev, found, []byte("v2"), 11)
+	data, rev, found = p.find(12, true)
+	test(data, rev, found, []byte("v3"), 12)
 
-	data, rev, found = p.find(17)
-	testNil(data, rev, found)
-
-	data, rev, found = p.find(14)
-	testNil(data, rev, found)
-
-	data, rev, found = p.find(13)
-	testNil(data, rev, found)
-
-	data, rev, found = p.find(10)
-	test(data, rev, found, 101, 10)
-
-	data, rev, found = p.find(11)
-	test(data, rev, found, 102, 11)
-
-	data, rev, found = p.find(12)
-	test(data, rev, found, 103, 12)
-
-	data, rev, found = p.find(16)
-	test(data, rev, found, 104, 16)
+	data, rev, found = p.find(1, false)
+	test(data, rev, found, []byte("v5"), 17)
+	data, rev, found = p.find(16, false)
+	test(data, rev, found, []byte("v5"), 17)
+	data, rev, found = p.find(17, false)
+	test(data, rev, found, []byte("v5"), 17)
 }
-*/
 
 func TestPairMarshalUnmarshal(t *testing.T) {
 	test := []*pair{
