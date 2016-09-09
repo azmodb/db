@@ -3,7 +3,6 @@ package db
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
@@ -148,6 +147,7 @@ func (s *Snapshotter) WriteTo(w io.Writer) (n int64, err error) {
 	return n, err
 }
 
+/*
 func ReadFrom(r io.Reader) (db *DB, n int64, err error) {
 	// tree: is initialized by s.readHeader(reader)
 	s := &Snapshotter{
@@ -181,6 +181,7 @@ func ReadFrom(r io.Reader) (db *DB, n int64, err error) {
 
 	return newDB(s.tree), n, err
 }
+*/
 
 func (s *Snapshotter) grow(size int) {
 	if cap(s.data) < size {

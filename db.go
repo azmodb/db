@@ -11,6 +11,8 @@ import (
 
 var valuePool = sync.Pool{New: func() interface{} { return &Value{&pb.Value{}} }}
 
+// Value represents a read-only key/value database query result. The
+// caller must close the value when done with it.
 type Value struct {
 	*pb.Value
 }
@@ -34,10 +36,8 @@ func newValue(data interface{}, revs []int64) *Value {
 	return v
 }
 
+// Close closes the value, rendering it unusable.
 func (v *Value) Close() {
-	if v == nil || v.Value == nil {
-		return
-	}
 	if cap(v.Value.Data) > 8192 { // TODO
 		v.Value.Data = v.Value.Data[:8192]
 	}
@@ -46,9 +46,18 @@ func (v *Value) Close() {
 	valuePool.Put(v)
 }
 
-func (v *Value) IsNum() bool   { return v.Value.Data == nil }
+// IsNum returns true if this value is a numeric value.
+func (v *Value) IsNum() bool { return v.Value.Data == nil }
+
+// Bytes returns the underlying value byte slice. If Value is a numeric
+// value Bytes returns nil.
 func (v *Value) Bytes() []byte { return v.Value.Data }
-func (v *Value) Num() int64    { return v.Value.Num }
+
+// Num returns the underlying integer. If Value is a byte slice value
+// Num returns 0.
+func (v *Value) Num() int64 { return v.Value.Num }
+
+// Revs() returns a revision numbers of this value.
 func (v *Value) Revs() []int64 { return v.Value.Revs }
 
 type DB struct {

@@ -64,7 +64,7 @@ func (db *DB) Range(from, to []byte, rev int64, fn RangeFunc) int64 {
 	return tree.rev
 }
 
-func (db *DB) Get(key []byte, rev int64, strict bool) (*Value, int64) {
+func (db *DB) Get(key []byte, rev int64, strict bool) (*Value, int64, bool) {
 	tree := db.load()
 	match := newMatcher(key)
 	defer match.Close()
@@ -74,12 +74,12 @@ func (db *DB) Get(key []byte, rev int64, strict bool) (*Value, int64) {
 		if rev > 0 {
 			data, _, found := p.find(rev, strict)
 			if !found {
-				return nil, tree.rev // revision not found
+				return nil, tree.rev, false // revision not found
 			}
-			return newValue(data, p.revs()), tree.rev
+			return newValue(data, p.revs()), tree.rev, true
 		}
 		data, _ := p.last()
-		return newValue(data, p.revs()), tree.rev
+		return newValue(data, p.revs()), tree.rev, true
 	}
-	return nil, tree.rev // key not found
+	return nil, tree.rev, false // key not found
 }
