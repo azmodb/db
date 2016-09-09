@@ -3,12 +3,7 @@ package azmo.db;
 option go_package = "pb";
 
 message Value {
-	repeated int64 revisions = 1;
-	bytes value = 2;
-}
-
-message Pair {
-	repeated int64 revisions = 1;
-	bytes key = 2;
-	bytes value = 3;
+	repeated int64 revs = 1;
+	bytes data = 2;
+	int64 num = 3;
 }

@@ -9,92 +9,51 @@ import (
 	"github.com/azmodb/llrb"
 )
 
-const (
-	// ErrRevisionNotFound means that a get call did not find the requested
-	// revision.
-	ErrRevisionNotFound = Error("revision not found")
+var valuePool = sync.Pool{New: func() interface{} { return &Value{&pb.Value{}} }}
 
-	// ErrKeyNotFound means that a get or watch call did not find the
-	// requested key.
-	ErrKeyNotFound = Error("key not found")
-)
-
-// Error represents a get or watch error.
-type Error string
-
-func (e Error) Error() string { return string(e) }
-
-// Txn represents a write-only transaction on the database.
-type Txn struct {
-	txn *llrb.Txn
-	rev int64
-	db  *DB
+type Value struct {
+	*pb.Value
 }
 
-// Put sets the value for the key in the database. If the key exists a
-// new version will be created. Supplied key/value pair must remain
-// valid for the life of the transaction.
-//
-// Put returns the previous value and revisions of the key/value pair
-// if any and the current revision of the database.
-func (t *Txn) Put(key, value []byte, ts bool) (*pb.Value, int64) {
-	match := getPair(key)
-	defer putPair(match)
-
-	// TODO: optimize value bcopy
-	var p *pair
-	t.rev++
-	if elem := t.txn.Get(match); elem != nil {
-		p = elem.(*pair).copy() // TODO: optimize, if tombstone
-		if ts {
-			p.items = []item{item{data: bcopy(value), rev: t.rev}}
-		} else {
-			p.append(bcopy(value), t.rev)
+func newValue(data interface{}, revs []int64) *Value {
+	v := valuePool.Get().(*Value)
+	switch t := data.(type) {
+	case []byte:
+		if cap(v.Value.Data) < len(t) {
+			v.Value.Data = make([]byte, len(t))
 		}
-		t.txn.Insert(p)
-	} else {
-		p = newPair(bcopy(key), bcopy(value), t.rev)
-		t.txn.Insert(p)
+		v.Value.Data = v.Value.Data[:len(t)]
+		copy(v.Value.Data, t)
+	case int64:
+		v.Value.Num = t
+	default:
+		panic("invalid value type")
 	}
 
-	t.db.mu.RLock()
-	if n, found := t.db.reg[string(key)]; found {
-		n.Notify(bcopy(value), p.revs())
-	}
-	t.db.mu.RUnlock()
-
-	return &pb.Value{
-		Value:     value, // TODO: copy value here?
-		Revisions: p.revs(),
-	}, t.rev
+	v.Value.Revs = revs
+	return v
 }
 
-// Delete remove a key from the database. If the key does not exist then
-// nothing is done.
-//
-// Delete returns the previous value and revisions of the key/value pair
-// if any and the current revision of the database.
-func (t *Txn) Delete(key []byte) (*pb.Value, int64) {
-	match := getPair(key)
-	defer putPair(match)
-
-	if elem := t.txn.Get(match); elem != nil {
-		p := elem.(*pair)
-		t.rev++
-		t.txn.Delete(match)
-
-		t.db.mu.RLock()
-		if n, found := t.db.reg[string(key)]; found {
-			n.Close()
-		}
-		t.db.mu.RUnlock()
-
-		return &pb.Value{
-			Value:     bcopy(p.last().data),
-			Revisions: p.revs(),
-		}, t.rev
+func (v *Value) Close() {
+	if v == nil || v.Value == nil {
+		return
 	}
-	return nil, t.rev
+	if cap(v.Value.Data) > 8192 { // TODO
+		v.Value.Data = v.Value.Data[:8192]
+	}
+	v.Value.Num = 0
+	v.Value.Revs = nil
+	valuePool.Put(v)
+}
+
+func (v *Value) IsNum() bool   { return v.Value.Data == nil }
+func (v *Value) Bytes() []byte { return v.Value.Data }
+func (v *Value) Num() int64    { return v.Value.Num }
+func (v *Value) Revs() []int64 { return v.Value.Revs }
+
+type DB struct {
+	writer sync.Mutex // exclusive writer transaction
+	tree   unsafe.Pointer
 }
 
 type tree struct {
@@ -102,164 +61,79 @@ type tree struct {
 	rev  int64
 }
 
-func newTree(rev int64) *tree {
-	return &tree{root: &llrb.Tree{}, rev: rev}
-}
-
-// DB is a consistent in-memory key/value store.
-type DB struct {
-	writer sync.Mutex // exclusive writer transaction
-	tree   unsafe.Pointer
-
-	mu  sync.RWMutex // protects notifier registry
-	reg map[string]*notifier
-}
-
-// New returns a consistent in-memory key/value store.
+// New returns a consistent in-memory key/value database.
 func New() *DB {
 	return &DB{
-		tree: unsafe.Pointer(newTree(0)),
-		reg:  make(map[string]*notifier),
+		tree: unsafe.Pointer(&tree{root: &llrb.Tree{}}),
 	}
 }
 
-// Txn starts a new transaction. One transaction can be used at a time.
-// Starting multiple transactions will cause the calls to block and be
-// serialized until the current transaction finishes. Transactions should
-// not be dependent on one another.
-//
-// You must commit or rollback transactions after you are finished!
-func (db *DB) Txn() *Txn {
-	db.writer.Lock()
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
-	return &Txn{
-		txn: tree.root.Txn(),
-		rev: tree.rev,
-		db:  db,
-	}
-}
+type RangeFunc func(key []byte, value *Value, rev int64) (done bool)
 
-// Commit closes the transaction and writes all changes into the
-// database.
-func (t *Txn) Commit() {
-	if t.db == nil || t.txn == nil { // already aborted or committed
-		return
-	}
-
-	tree := &tree{
-		root: t.txn.Commit(),
-		rev:  t.rev,
-	}
-
-	atomic.StorePointer(&t.db.tree, unsafe.Pointer(tree))
-	t.txn = nil
-	t.rev = 0
-	t.db.writer.Unlock() // release the writer lock
-	t.db = nil
-}
-
-// Rollback closes the transaction and ignores all previous updates.
-func (t *Txn) Rollback() {
-	if t.db == nil || t.txn == nil { // already aborted or committed
-		return
-	}
-
-	t.txn = nil
-	t.db.writer.Unlock() // release the writer lock
-	t.db = nil
-}
-
-// Get gets the value for the given key and revision. If revision <= 0
-// Get returns the last version.
-//
-// Get returns the current revision of the database. If there is an
-// error it will be of type ErrKeyNotFound of ErrRevisionNotFound.
-func (db *DB) Get(key []byte, rev int64) (*pb.Value, int64, error) {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
-	match := getPair(key)
-	defer putPair(match)
-
-	if elem := tree.root.Get(match); elem != nil {
+func rangeFunc(wantRev int64, fn RangeFunc) llrb.Visitor {
+	return func(elem llrb.Element) bool {
+		var data interface{}
+		var rev int64
 		p := elem.(*pair)
-		if rev > 0 {
-			item, found := p.findByRev(rev)
-			if !found {
-				return nil, tree.rev, ErrRevisionNotFound
-			}
-			return &pb.Value{
-				Value:     bcopy(item.data),
-				Revisions: p.revs(),
-			}, tree.rev, nil
-		}
 
-		return &pb.Value{
-			Value:     bcopy(p.last().data),
-			Revisions: p.revs(),
-		}, tree.rev, nil
-	}
-	return nil, tree.rev, ErrKeyNotFound
-}
-
-// Func is a function that operates on a key range. If done is returned
-// true, the Func is indicating that no further work needs to be done
-// and so the traversal function should traverse no further.
-type Func func(pair *pb.Pair, rev int64) (done bool)
-
-func (db *DB) Range(from, to []byte, rev int64, fn Func) int64 {
-	tree := (*tree)(atomic.LoadPointer(&db.tree))
-
-	f := func(elem llrb.Element) bool {
-		p := elem.(*pair)
-		var item item
-		if rev > 0 {
-			var found bool
-			item, found = p.findByRev(rev)
-			if !found {
-				return false
-			}
+		if wantRev > 0 {
+			// TODO: find does not work here, need p.smallerThan(wantRev)
+			/*
+				var found bool
+				data, rev, found = p.find(wantRev)
+				if !found {
+					return false
+				}
+			*/
 		} else {
-			item = p.last()
+			data, rev = p.last()
 		}
-
-		return fn(&pb.Pair{
-			Key:       bcopy(p.key),
-			Value:     bcopy(item.data),
-			Revisions: p.revs(),
-		}, tree.rev)
+		switch t := data.(type) { // we need to copy the key here
+		case []byte:
+			return fn(bcopy(p.key), newValue(t, p.revs()), rev)
+		case int64:
+			return fn(bcopy(p.key), newValue(t, p.revs()), rev)
+		}
+		panic("invalid value type")
 	}
+}
 
-	fromPair, toPair := getPair(from), getPair(to)
+func (db *DB) Range(from, to []byte, rev int64, fn RangeFunc) int64 {
+	fromMatch, toMatch := newMatcher(from), newMatcher(to)
 	defer func() {
-		putPair(fromPair)
-		putPair(toPair)
+		fromMatch.Close()
+		toMatch.Close()
 	}()
-	tree.root.Range(fromPair, toPair, f)
+
+	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	tree.root.Range(fromMatch, toMatch, rangeFunc(rev, fn))
 	return tree.rev
 }
 
-// Watch returns a new watcher for the give key and the current
-// revision of the database.
-//
-// If there is an error it will be of type ErrKeyNotFound.
-func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
+func (db *DB) Get(key []byte, rev int64) (*Value, int64) {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
-	match := getPair(key)
-	defer putPair(match)
+	match := newMatcher(key)
+	defer match.Close()
 
 	if elem := tree.root.Get(match); elem != nil {
-		db.mu.Lock()
-		n, found := db.reg[string(key)]
-		if !found {
-			n = newNotifier()
-			db.reg[string(key)] = n
+		p := elem.(*pair)
+		if rev > 0 {
+			data, _, found := p.find(rev)
+			if !found {
+				return nil, tree.rev // revision not found
+			}
+			return newValue(data, p.revs()), tree.rev
 		}
-
-		watcher := n.Add()
-		db.mu.Unlock()
-
-		return watcher, tree.rev, nil
+		data, _ := p.last()
+		return newValue(data, p.revs()), tree.rev
 	}
-	return nil, tree.rev, ErrKeyNotFound
+	return nil, tree.rev // key not found
+}
+
+func (db *DB) Next() *Batch {
+	db.writer.Lock()
+	tree := (*tree)(atomic.LoadPointer(&db.tree))
+	return &Batch{txn: tree.root.Txn(), rev: tree.rev, db: db}
 }
 
 // Rev returns the current revision of the database.
@@ -268,14 +142,9 @@ func (db *DB) Rev() int64 {
 	return tree.rev
 }
 
-// Len returns the number of elemets in the database.
-func (db *DB) Len() int {
+// len returns the number of keys in the database. only usefull for unit
+// testing.
+func (db *DB) len() int {
 	tree := (*tree)(atomic.LoadPointer(&db.tree))
 	return tree.root.Len()
-}
-
-func bcopy(src []byte) []byte {
-	dst := make([]byte, len(src))
-	copy(dst, src)
-	return dst
 }
