@@ -2,9 +2,12 @@ package db
 
 import (
 	"bytes"
+	"encoding"
 
 	"github.com/azmodb/llrb"
 )
+
+type EncodeFunc func(key []byte, value encoding.BinaryMarshaler) bool
 
 type RangeFunc func(key []byte, value *Value, rev int64) (done bool)
 
@@ -34,6 +37,49 @@ func rangeFunc(wantRev int64, fn RangeFunc, stop []byte) llrb.Visitor {
 		}
 		panic("invalid value type")
 	}
+}
+
+func encFunc(fn EncodeFunc, stop []byte) llrb.Visitor {
+	return func(elem llrb.Element) bool {
+		p := elem.(*pair)
+
+		if stop != nil {
+			if bytes.Compare(p.key, stop) >= 0 {
+				return true
+			}
+		}
+		return fn(bcopy(p.key), p)
+	}
+}
+
+// TODO: remove copy and past code from Encode and Range
+
+func (db *DB) Encode(from, to []byte, rev int64, enc EncodeFunc) int64 {
+	tree := db.load()
+	if from == nil && to == nil {
+		tree.root.ForEach(encFunc(enc, nil))
+		return tree.rev
+	}
+	if from == nil && to != nil {
+		tree.root.ForEach(encFunc(enc, to))
+		return tree.rev
+	}
+
+	switch cmp := bytes.Compare(from, to); {
+	case cmp > 0: // invalid range, report nothing
+		return tree.rev
+	case cmp == 0:
+		panic("TODO: get value with smaller or equal revision")
+	}
+
+	fromMatch, toMatch := newMatcher(from), newMatcher(to)
+	defer func() {
+		fromMatch.Close()
+		toMatch.Close()
+	}()
+
+	tree.root.Range(fromMatch, toMatch, encFunc(enc, nil))
+	return tree.rev
 }
 
 func (db *DB) Range(from, to []byte, rev int64, fn RangeFunc) int64 {

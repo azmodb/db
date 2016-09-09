@@ -99,13 +99,39 @@ func (db *DB) Next() *Batch {
 	return &Batch{txn: tree.root.Txn(), rev: tree.rev, db: db}
 }
 
-func (db *DB) Reload(backend backend.Backend) {
+func (db *DB) Reload(backend backend.Backend) (err error) {
+	tree := &llrb.Tree{}
+	txn := tree.Txn()
+
 	backend.Range(func(key, value []byte) bool {
+		p := &pair{}
+		err = p.UnmarshalBinary(value)
+		if err != nil {
+			return true
+		}
+		txn.Insert(p)
 		return false
 	})
+	return err
 }
 
-func (db *DB) Snapshot(backend backend.Backend) {}
+func (db *DB) Snapshot(backend backend.Backend) (err error) {
+	tree := db.load()
+	tree.root.ForEach(func(elem llrb.Element) bool {
+		p := elem.(*pair)
+		value, e := p.MarshalBinary()
+		if e != nil {
+			err = e
+			return true
+		}
+		if e = backend.Put(p.key, value); e != nil {
+			err = e
+			return true
+		}
+		return false
+	})
+	return err
+}
 
 // Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {

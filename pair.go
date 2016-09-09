@@ -189,6 +189,13 @@ const (
 //
 // key (bytes) |
 
+// MarshalBinary implements the encoding.BinaryMarshaler interface.
+func (p *pair) MarshalBinary() ([]byte, error) {
+	buf := make([]byte, p.size())
+	p.marshal(buf)
+	return buf, nil
+}
+
 func (p *pair) marshal(buf []byte) (n int) {
 	n = putUvarint(buf[0:], len(p.key))
 	n += copy(buf[n:], p.key)
@@ -229,6 +236,11 @@ func (p *pair) size() (n int) {
 		n += uvarintSize(uint64(item.rev))
 	}
 	return n
+}
+
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+func (p *pair) UnmarshalBinary(buf []byte) error {
+	return p.unmarshal(buf)
 }
 
 func (p *pair) unmarshal(buf []byte) error {
