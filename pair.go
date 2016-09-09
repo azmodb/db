@@ -11,6 +11,7 @@ import (
 
 var pairPool = sync.Pool{New: func() interface{} { return &pair{} }}
 
+// matcher represents a key search query.
 type matcher interface {
 	llrb.Element
 	Close()
