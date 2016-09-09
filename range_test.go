@@ -25,7 +25,7 @@ func TestDBGetStrictRevision(t *testing.T) {
 		}
 	}
 
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 	b.Insert([]byte("k1"), []byte("v1.1"), false)
 	b.Insert([]byte("k1"), []byte("v1.2"), false)
@@ -81,7 +81,7 @@ func TestDBGet(t *testing.T) {
 		}
 	}
 
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 	b.Insert([]byte("k1"), []byte("v1"), false)
 	b.Insert([]byte("k2"), []byte("v2"), false)
@@ -130,7 +130,7 @@ func TestGetValueType(t *testing.T) {
 		}
 	}
 
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 
 	b.Insert([]byte("k1"), []byte("v1.1"), false)
@@ -172,7 +172,7 @@ func TestGetValueType(t *testing.T) {
 
 /*
 func TestBasicRange(t *testing.T) {
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 	b.Increment([]byte("k1"), 1, false)
 	b.Increment([]byte("k1"), 1, false)

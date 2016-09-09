@@ -24,7 +24,7 @@ func TestBatchInsertAndPut(t *testing.T) {
 		}
 	}
 
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 
 	// [[k1 -> v1.1], [k2 -> v2.1]]
@@ -79,7 +79,7 @@ func TestBatchIncrementAndDecrement(t *testing.T) {
 		}
 	}
 
-	db := New()
+	db := newDB(nil)
 	b := db.Next()
 
 	// [[k1 -> 1], [k2 -> 1]]

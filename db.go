@@ -104,8 +104,8 @@ func (db *DB) Rev() int64 {
 	return tree.rev
 }
 
-// len returns the number of keys in the database. only usefull for unit
-// testing.
+// len returns the number of keys in the database. only usefull for
+// unit esting.
 func (db *DB) len() int {
 	tree := db.load()
 	return tree.root.Len()
