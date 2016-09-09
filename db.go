@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/azmodb/db/backend"
 	"github.com/azmodb/db/pb"
 	"github.com/azmodb/llrb"
 )
@@ -97,6 +98,14 @@ func (db *DB) Next() *Batch {
 	tree := db.load()
 	return &Batch{txn: tree.root.Txn(), rev: tree.rev, db: db}
 }
+
+func (db *DB) Reload(backend backend.Backend) {
+	backend.Range(func(key, value []byte) bool {
+		return false
+	})
+}
+
+func (db *DB) Snapshot(backend backend.Backend) {}
 
 // Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {

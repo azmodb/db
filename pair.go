@@ -189,12 +189,6 @@ const (
 //
 // key (bytes) |
 
-func (p *pair) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, p.size())
-	p.marshal(buf)
-	return buf, nil
-}
-
 func (p *pair) marshal(buf []byte) (n int) {
 	n = putUvarint(buf[0:], len(p.key))
 	n += copy(buf[n:], p.key)
