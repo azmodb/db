@@ -208,7 +208,7 @@ func (p *pair) tombstone(value interface{}, rev int64) {
 	if !ok {
 		panic("pair: unsupported tombstone data type")
 	}
-	if len(p.Values) >= 1 {
+	if len(p.Values) > 1 {
 		p.Values = p.Values[:1:1]
 	}
 
