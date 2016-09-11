@@ -120,12 +120,12 @@ func (r *Record) Close() {
 		}
 	}
 
-	r.Values = r.Values[:0]
-	r.Type = 0
-	r.Current = 0
-	recPool.Put(r)
+	rec := r
+	rec.Values = rec.Values[:0]
+	rec.Type = 0
+	rec.Current = 0
+	recPool.Put(rec)
 
-	r.Record = nil
 	r = nil
 }
 

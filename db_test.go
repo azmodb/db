@@ -21,25 +21,33 @@ func TestDBIntegration(t *testing.T) {
 
 	rec, _ := db.Get([]byte("k1"), 0, true)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("k1"), 0, false)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("k1"), 1, false)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("k1"), 1, true)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("n1"), 0, true)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("n1"), 0, false)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("n1"), 7, false)
 	fmt.Println(rec)
+	rec.Close()
 
 	rec, _ = db.Get([]byte("n1"), 7, true)
 	fmt.Println(rec)
+	rec.Close()
 }
