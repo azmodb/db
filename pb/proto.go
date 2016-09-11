@@ -1,3 +1,3 @@
-//go:generate protoc --proto_path=. --go_out=. db.proto
+//go:generate protoc --proto_path=. --gofast_out=. db.proto
 
 package pb

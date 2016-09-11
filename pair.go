@@ -12,7 +12,7 @@ import (
 // pair represents an internal immutable key/value pair. A pair value can
 // be of type []byte (unicode) or int64 (numeric).
 type pair struct {
-	sync.Mutex
+	state sync.Mutex // protects key/value state
 	dirty bool
 
 	*pb.Pair
@@ -130,7 +130,8 @@ func (r *Record) Close() {
 }
 
 // clone allocates a new key/value pair. clone does not copy the
-// underlying key and values content.
+// underlying key and values content. clone markes the newly
+// created pair dirty.
 func (p *pair) clone() *pair {
 	if p == nil || len(p.Values) == 0 {
 		panic("pair: cannot clone uninitialized key/value pair")
@@ -265,4 +266,11 @@ func bcopy(src []byte) []byte {
 	dst := make([]byte, len(src))
 	copy(dst, src)
 	return dst
+}
+
+func grow(dst []byte, n int) []byte {
+	if cap(dst) < n {
+		dst = make([]byte, n)
+	}
+	return dst[:n]
 }
