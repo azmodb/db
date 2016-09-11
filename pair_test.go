@@ -74,7 +74,7 @@ func TestPairIncrement(t *testing.T) {
 	test(p, []byte("k"), int64(-1), 7, 1)
 }
 
-func TestPairFind(t *testing.T) {
+func TestPairFindMustEqual(t *testing.T) {
 	p := newPair([]byte("k"), []byte("v2"), 2)
 	p.append([]byte("v3"), 3)
 	p.append([]byte("v4"), 4)
@@ -84,7 +84,7 @@ func TestPairFind(t *testing.T) {
 	p.append([]byte("v13"), 13)
 
 	for i, rev := range []int64{2, 3, 4, 10, 11, 12, 13} {
-		index, found := p.find(rev)
+		index, found := p.find(rev, true)
 		if index != i {
 			t.Fatalf("find: expected index %d, have %d", i, index)
 		}
@@ -94,7 +94,7 @@ func TestPairFind(t *testing.T) {
 	}
 
 	for _, rev := range []int64{-1, 0, 1, 5, 6, 7, 8, 9, 14, 99} {
-		index, found := p.find(rev)
+		index, found := p.find(rev, true)
 		if index != 0 {
 			t.Fatalf("find: expected index 0, have %d", index)
 		}

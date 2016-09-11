@@ -231,7 +231,7 @@ func (p *pair) increment(value interface{}, rev int64) {
 	p.Values[0] = val
 }
 
-func (p *pair) find(rev int64) (index int, found bool) {
+func (p *pair) find(rev int64, equal bool) (index int, found bool) {
 	index = sort.Search(len(p.Values), func(i int) bool {
 		return p.Values[i].Rev >= rev
 	})
@@ -239,8 +239,14 @@ func (p *pair) find(rev int64) (index int, found bool) {
 		return 0, found
 	}
 
-	if p.Values[index].Rev == rev {
-		return index, true
+	if equal {
+		if p.Values[index].Rev == rev {
+			return index, true
+		}
+	} else {
+		if p.Values[index].Rev >= rev {
+			return index, true
+		}
 	}
 	return 0, found // revision not found
 }

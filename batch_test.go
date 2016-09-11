@@ -70,8 +70,10 @@ func TestBatchPutAndInsertRecord(t *testing.T) {
 	}
 }
 
+/*
 func TestBatchPutAndInsert(t *testing.T) {
 	db := newDB(nil)
 	b := db.Next()
 	b.Commit()
 }
+*/
