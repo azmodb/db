@@ -1,0 +1,21 @@
+syntax = "proto3";
+package azmodb;
+option go_package = "pb";
+
+message Record {
+	repeated Value values = 1;
+	int32 type = 2;
+	int64 current = 3;
+}
+
+message Pair {
+	repeated Value values = 1;
+	bytes key = 2;
+	int32 type = 3;
+}
+
+message Value {
+	bytes unicode = 1;
+	int64 numeric = 2;
+	int64 rev = 3;
+}
