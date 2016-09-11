@@ -12,18 +12,20 @@ type Batch struct {
 	db  *DB
 }
 
-func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, bool) {
+var errInvalidDataType = errors.New("invalid data type")
+
+func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, error) {
 	match := newMatcher(key)
 	defer match.Close()
 
 	b.rev++ // increment batch revision
 	var p, parent *pair
 	if elem := b.txn.Get(match); elem != nil {
+		_, isNum := value.(int64)
 		parent = elem.(*pair)
 		p = parent.clone()
-		isNum := p.isNum()
-		if _, ok := value.(int64); isNum && !ok {
-			panic("TODO: handle invalid data type")
+		if (isNum && !p.isNum()) || (!isNum && p.isNum()) {
+			return nil, errInvalidDataType
 		}
 
 		if !p.isNum() {
@@ -41,45 +43,45 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, b
 	b.txn.Insert(p)
 
 	if !prev || parent == nil {
-		return nil, true
+		return nil, nil
 	}
-	return parent.last(b.rev), true
+	return parent.last(b.rev), nil
 }
 
 func (b *Batch) Decrement(key []byte, value int64, prev bool) (*Record, error) {
-	rec, ok := b.insert(key, value*-1, false, prev)
-	if ok {
-		return rec, nil
+	rec, err := b.insert(key, value*-1, false, prev)
+	if err != nil {
+		rec.Close()
+		return nil, err
 	}
-	rec.Close()
-	return nil, errors.New("data type mismatch")
+	return rec, nil
 }
 
 func (b *Batch) Increment(key []byte, value int64, prev bool) (*Record, error) {
-	rec, ok := b.insert(key, value, false, prev)
-	if ok {
-		return rec, nil
+	rec, err := b.insert(key, value, false, prev)
+	if err != nil {
+		rec.Close()
+		return nil, err
 	}
-	rec.Close()
-	return nil, errors.New("data type mismatch")
+	return rec, nil
 }
 
 func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
-	rec, ok := b.insert(key, value, false, prev)
-	if ok {
-		return rec, nil
+	rec, err := b.insert(key, value, false, prev)
+	if err != nil {
+		rec.Close()
+		return nil, err
 	}
-	rec.Close()
-	return nil, errors.New("data type mismatch")
+	return rec, nil
 }
 
 func (b *Batch) Put(key []byte, value []byte, prev bool) (*Record, error) {
-	rec, ok := b.insert(key, value, true, prev)
-	if ok {
-		return rec, nil
+	rec, err := b.insert(key, value, true, prev)
+	if err != nil {
+		rec.Close()
+		return nil, err
 	}
-	rec.Close()
-	return nil, errors.New("data type mismatch")
+	return rec, nil
 }
 
 func (b *Batch) Delete(key []byte) (*Record, error) {
