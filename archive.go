@@ -6,9 +6,12 @@ import (
 )
 
 func (db *DB) Snapshot(backend backend.Backend) (rev int64, err error) {
+	db.archive.Lock()
+	defer db.archive.Unlock()
+
 	tree := db.load()
 	rev = tree.rev
-	b, err := backend.Next()
+	b, err := backend.Next(rev)
 	if err != nil {
 		return rev, err
 	}
@@ -42,6 +45,9 @@ func (db *DB) Snapshot(backend backend.Backend) (rev int64, err error) {
 }
 
 func (db *DB) Reload(backend backend.Backend) (rev int64, err error) {
+	db.archive.Lock()
+	defer db.archive.Unlock()
+
 	tree := db.load()
 	rev = tree.rev
 	return rev, backend.Range(func(key, value []byte) bool {

@@ -7,5 +7,6 @@ func (db *DB) Watch(key []byte) (*Watcher, error) {
 }
 
 func (w *Watcher) Recv() <-chan *Record { return nil }
+func (w *Watcher) Rev() int64           { return 0 }
 func (w *Watcher) ID() int64            { return 0 }
 func (w *Watcher) Close()               {}

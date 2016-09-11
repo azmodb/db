@@ -84,7 +84,7 @@ func (b *Batch) Put(key []byte, value []byte, prev bool) (*Record, error) {
 	return rec, nil
 }
 
-func (b *Batch) Delete(key []byte) (*Record, error) {
+func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
 	return nil, nil
 }
 

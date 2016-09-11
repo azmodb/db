@@ -26,6 +26,9 @@ const (
 	unicode
 )
 
+// Record represents a consistent key/value database key search query or
+// update result. This structure should be kept immutable and closed
+// after done with it. A record is not thread-safe.
 type Record struct {
 	*pb.Record
 }
@@ -84,10 +87,7 @@ func cloneRecord(values []*pb.Value, vtype int32, cur int64) *Record {
 		if vtype == unicode {
 			value := unicodePool.Get().(*pb.Value)
 			n := len(val.Unicode)
-			if cap(value.Unicode) < n {
-				value.Unicode = make([]byte, n)
-			}
-			value.Unicode = value.Unicode[:n]
+			value.Unicode = grow(value.Unicode, n)
 			copy(value.Unicode, val.Unicode)
 
 			value.Rev = val.Rev
@@ -103,6 +103,7 @@ func cloneRecord(values []*pb.Value, vtype int32, cur int64) *Record {
 	return rec
 }
 
+// Close closes the record, rendering it unusable.
 func (r *Record) Close() {
 	if r == nil || r.Record == nil {
 		return
@@ -110,7 +111,10 @@ func (r *Record) Close() {
 
 	for _, val := range r.Values {
 		if r.Type == unicode {
-			val.Unicode = val.Unicode[:0] // TODO: remove too big slices
+			if cap(val.Unicode) > 16*1024 { // TODO: find default
+				continue
+			}
+			val.Unicode = val.Unicode[:0]
 			val.Rev = 0
 			unicodePool.Put(val)
 		} else {
@@ -120,7 +124,7 @@ func (r *Record) Close() {
 		}
 	}
 
-	rec := r
+	rec := r // reset pb.Record
 	rec.Values = rec.Values[:0]
 	rec.Type = 0
 	rec.Current = 0
@@ -130,8 +134,8 @@ func (r *Record) Close() {
 }
 
 // clone allocates a new key/value pair. clone does not copy the
-// underlying key and values content. clone markes the newly
-// created pair dirty.
+// underlying key and values content but marks the newly created
+// key/value pair as dirty.
 func (p *pair) clone() *pair {
 	if p == nil || len(p.Values) == 0 {
 		panic("pair: cannot clone uninitialized key/value pair")

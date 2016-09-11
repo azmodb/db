@@ -1,5 +1,5 @@
 syntax = "proto3";
-package azmodb;
+package db;
 option go_package = "pb";
 
 message Record {

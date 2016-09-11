@@ -12,8 +12,9 @@ import (
 
 // DB represents an immutable, consistent, im-memory key/value database.
 type DB struct {
-	writer sync.Mutex // exclusive writer transaction
-	tree   unsafe.Pointer
+	archive sync.Mutex // exclusive archive transaction
+	writer  sync.Mutex // exclusive writer transaction
+	tree    unsafe.Pointer
 }
 
 type tree struct {
