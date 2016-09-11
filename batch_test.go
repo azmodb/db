@@ -74,6 +74,13 @@ func TestBatchPutAndInsertRecord(t *testing.T) {
 func TestBatchPutAndInsert(t *testing.T) {
 	db := newDB(nil)
 	b := db.Next()
+	b.Insert([]byte("k1"), []byte("v1.1"), false)
+	b.Insert([]byte("k1"), []byte("v1.2"), false)
+	b.Insert([]byte("k1"), []byte("v1.3"), false)
+	b.Insert([]byte("k1"), []byte("v1.4"), false)
 	b.Commit()
+
+	rec, _ := db.Get([]byte("k1"), 0, false)
+	fmt.Println(rec)
 }
 */

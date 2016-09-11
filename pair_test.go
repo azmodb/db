@@ -74,7 +74,7 @@ func TestPairIncrement(t *testing.T) {
 	test(p, []byte("k"), int64(-1), 7, 1)
 }
 
-func TestPairFindMustEqual(t *testing.T) {
+func TestPairFindEqual(t *testing.T) {
 	p := newPair([]byte("k"), []byte("v2"), 2)
 	p.append([]byte("v3"), 3)
 	p.append([]byte("v4"), 4)
@@ -89,7 +89,7 @@ func TestPairFindMustEqual(t *testing.T) {
 			t.Fatalf("find: expected index %d, have %d", i, index)
 		}
 		if !found {
-			t.Fatalf("find: expected to found rev %d", rev)
+			t.Fatalf("find: expected to find rev %d", rev)
 		}
 	}
 
@@ -99,7 +99,47 @@ func TestPairFindMustEqual(t *testing.T) {
 			t.Fatalf("find: expected index 0, have %d", index)
 		}
 		if found {
-			t.Fatalf("find: epxected to not found rev %d", rev)
+			t.Fatalf("find: epxected to not find rev %d", rev)
+		}
+	}
+}
+
+func TestPairFindGreateThan(t *testing.T) {
+	p := newPair([]byte("k"), []byte("v2"), 2)
+	p.append([]byte("v3"), 3)
+	p.append([]byte("v4"), 4)
+	p.append([]byte("v10"), 10)
+	p.append([]byte("v11"), 11)
+	p.append([]byte("v12"), 12)
+	p.append([]byte("v13"), 13)
+
+	for i, rev := range []int64{2, 3, 4, 10, 11, 12, 13} {
+		index, found := p.find(rev, false)
+		if index != i {
+			t.Fatalf("find: expected index %d, have %d", i, index)
+		}
+		if !found {
+			t.Fatalf("find: expected to find rev %d", rev)
+		}
+	}
+
+	for _, rev := range []int64{0, -1} {
+		index, found := p.find(rev, false)
+		if index != 0 {
+			t.Fatalf("find: expected index 0, have %d", index)
+		}
+		if !found {
+			t.Fatalf("find: epxected to find rev %d", rev)
+		}
+	}
+
+	for _, rev := range []int64{14, 99} {
+		index, found := p.find(rev, false)
+		if index != 0 {
+			t.Fatalf("find: expected index 0, have %d", index)
+		}
+		if found {
+			t.Fatalf("find: epxected to not find rev %d", rev)
 		}
 	}
 }

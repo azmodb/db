@@ -1,10 +1,6 @@
 package db
 
-import (
-	"fmt"
-	"testing"
-)
-
+/*
 func TestDBIntegration(t *testing.T) {
 	db := newDB(nil)
 	b := db.Next()
@@ -51,3 +47,4 @@ func TestDBIntegration(t *testing.T) {
 	fmt.Println(rec)
 	rec.Close()
 }
+*/
