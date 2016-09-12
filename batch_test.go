@@ -105,9 +105,9 @@ func TestBatchPutAndInsertRecord(t *testing.T) {
 	rec, err = b.Insert([]byte("k1"), []byte("v1.3"), false)
 	test(rec, err, nil, nil, 0)
 	rec, err = b.Increment([]byte("k1"), 1, true)
-	test(rec, err, nil, errInvalidDataType, 0)
+	test(rec, err, nil, errIncompatibleValue, 0)
 	rec, err = b.Decrement([]byte("k1"), 1, true)
-	test(rec, err, nil, errInvalidDataType, 0)
+	test(rec, err, nil, errIncompatibleValue, 0)
 	b.Rollback()
 
 	b = db.Next() // test numeric data type
@@ -120,9 +120,9 @@ func TestBatchPutAndInsertRecord(t *testing.T) {
 	rec, err = b.Decrement([]byte("n1"), int64(1), false)
 	test(rec, err, nil, nil, 0)
 	rec, err = b.Insert([]byte("n1"), []byte("1"), true)
-	test(rec, err, nil, errInvalidDataType, 0)
+	test(rec, err, nil, errIncompatibleValue, 0)
 	rec, err = b.Put([]byte("n1"), []byte("1"), true)
-	test(rec, err, nil, errInvalidDataType, 0)
+	test(rec, err, nil, errIncompatibleValue, 0)
 	b.Rollback()
 
 	if db.Len() != 0 || db.Rev() != 0 {
