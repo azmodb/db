@@ -2,8 +2,68 @@ package db
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
+
+	"github.com/azmodb/db/pb"
 )
+
+func TestBatchPutAndInsert(t *testing.T) {
+	db := newDB(nil)
+	b := db.Next()
+	b.Insert([]byte("k1"), []byte("v1.1"), false)
+	b.Insert([]byte("k1"), []byte("v1.2"), false)
+	b.Insert([]byte("k1"), []byte("v1.3"), false)
+	b.Insert([]byte("k1"), []byte("v1.4"), false)
+	b.Commit()
+
+	want := &Record{Record: &pb.Record{Type: unicode, Current: 4}}
+	values := []*pb.Value{
+		&pb.Value{Unicode: []byte("v1.1"), Rev: 1},
+		&pb.Value{Unicode: []byte("v1.2"), Rev: 2},
+		&pb.Value{Unicode: []byte("v1.3"), Rev: 3},
+		&pb.Value{Unicode: []byte("v1.4"), Rev: 4},
+	}
+	for _, test := range []struct {
+		key    string
+		rev    int64
+		vers   bool
+		values []*pb.Value
+		err    error
+	}{
+		{"k1", 0, false, values[len(values)-1:], nil},
+		{"k1", 0, true, values, nil},
+		{"k1", -1, false, values[len(values)-1:], nil},
+		{"k1", -1, true, values, nil},
+
+		{"k1", 1, true, values[0:], nil},
+		{"k1", 2, true, values[1:], nil},
+		{"k1", 3, true, values[2:], nil},
+		{"k1", 4, true, values[3:], nil},
+
+		{"k1", 1, false, values[0:1], nil},
+		{"k1", 2, false, values[1:2], nil},
+		{"k1", 3, false, values[2:3], nil},
+		{"k1", 4, false, values[3:4], nil},
+
+		{"k1", 5, false, nil, errRevisionNotFound},
+		{"k1", 5, true, nil, errRevisionNotFound},
+		{"k99", 5, true, nil, errKeyNotFound},
+		{"k99", 5, false, nil, errKeyNotFound},
+	} {
+		want.Values = test.values
+		rec, err := db.Get([]byte(test.key), test.rev, test.vers)
+		if err != test.err {
+			t.Fatalf("insert: expected error %v, have %v", test.err, err)
+		}
+		if test.values == nil {
+			continue
+		}
+		if !reflect.DeepEqual(want, rec) {
+			t.Fatalf("insert: record differ:\n%+v\n%+v", want, rec)
+		}
+	}
+}
 
 func TestBatchPutAndInsertRecord(t *testing.T) {
 	test := func(rec *Record, err error, wval interface{}, werr error, vlen int) {
@@ -69,18 +129,3 @@ func TestBatchPutAndInsertRecord(t *testing.T) {
 		t.Fatalf("insert: database is NOT immutable")
 	}
 }
-
-/*
-func TestBatchPutAndInsert(t *testing.T) {
-	db := newDB(nil)
-	b := db.Next()
-	b.Insert([]byte("k1"), []byte("v1.1"), false)
-	b.Insert([]byte("k1"), []byte("v1.2"), false)
-	b.Insert([]byte("k1"), []byte("v1.3"), false)
-	b.Insert([]byte("k1"), []byte("v1.4"), false)
-	b.Commit()
-
-	rec, _ := db.Get([]byte("k1"), 0, false)
-	fmt.Println(rec)
-}
-*/

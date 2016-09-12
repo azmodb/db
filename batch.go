@@ -1,18 +1,12 @@
 package db
 
-import (
-	"errors"
-
-	"github.com/azmodb/llrb"
-)
+import "github.com/azmodb/llrb"
 
 type Batch struct {
 	txn *llrb.Txn
 	rev int64
 	db  *DB
 }
-
-var errInvalidDataType = errors.New("invalid data type")
 
 func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, error) {
 	match := newMatcher(key)
@@ -25,7 +19,7 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 		parent = elem.(*pair)
 		p = parent.clone()
 		if (isNum && !p.isNum()) || (!isNum && p.isNum()) {
-			return nil, errInvalidDataType
+			return nil, errIncompatibleValue
 		}
 
 		if !p.isNum() {

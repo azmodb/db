@@ -2,7 +2,6 @@ package db
 
 import (
 	"bytes"
-	"errors"
 
 	"github.com/azmodb/llrb"
 )
@@ -82,7 +81,7 @@ func (db *DB) get(key []byte, rev int64, vers bool) (*Record, error) {
 		if rev > 0 {
 			index, found := p.find(rev, false)
 			if !found {
-				return nil, errors.New("revision not found")
+				return nil, errRevisionNotFound
 			}
 			if vers {
 				rec = p.from(index, tree.rev)
@@ -98,6 +97,5 @@ func (db *DB) get(key []byte, rev int64, vers bool) (*Record, error) {
 		}
 		return rec, nil
 	}
-	return nil, errors.New("key not found")
-
+	return nil, errKeyNotFound
 }
