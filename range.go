@@ -79,7 +79,7 @@ func (db *DB) get(key []byte, rev int64, vers bool) (*Record, error) {
 		p := elem.(*pair)
 		var rec *Record
 		if rev > 0 {
-			index, found := p.find(rev, false)
+			index, found := p.find(rev, true)
 			if !found {
 				return nil, errRevisionNotFound
 			}

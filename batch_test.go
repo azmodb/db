@@ -12,55 +12,101 @@ func TestBatchPutAndInsert(t *testing.T) {
 	db := newDB(nil)
 	b := db.Next()
 	b.Insert([]byte("k1"), []byte("v1.1"), false)
+	b.Put([]byte("k2"), []byte("v2.1"), false)
+
 	b.Insert([]byte("k1"), []byte("v1.2"), false)
 	b.Insert([]byte("k1"), []byte("v1.3"), false)
 	b.Insert([]byte("k1"), []byte("v1.4"), false)
+
+	b.Insert([]byte("k2"), []byte("v2.2"), false)
+	b.Insert([]byte("k2"), []byte("v2.3"), false)
+	b.Put([]byte("k2"), []byte("v2.4"), false)
+	b.Put([]byte("k2"), []byte("v2.5"), false)
 	b.Commit()
 
-	want := &Record{Record: &pb.Record{Type: unicode, Current: 4}}
-	values := []*pb.Value{
+	want := &Record{Record: &pb.Record{Type: unicode, Current: 9}}
+	values1 := []*pb.Value{
 		&pb.Value{Unicode: []byte("v1.1"), Rev: 1},
-		&pb.Value{Unicode: []byte("v1.2"), Rev: 2},
-		&pb.Value{Unicode: []byte("v1.3"), Rev: 3},
-		&pb.Value{Unicode: []byte("v1.4"), Rev: 4},
+		&pb.Value{Unicode: []byte("v1.2"), Rev: 3},
+		&pb.Value{Unicode: []byte("v1.3"), Rev: 4},
+		&pb.Value{Unicode: []byte("v1.4"), Rev: 5},
 	}
-	for _, test := range []struct {
+	values2 := []*pb.Value{
+		&pb.Value{Unicode: []byte("v2.1"), Rev: 1},
+		&pb.Value{Unicode: []byte("v2.2"), Rev: 6},
+		&pb.Value{Unicode: []byte("v2.3"), Rev: 7},
+		&pb.Value{Unicode: []byte("v2.4"), Rev: 8},
+		&pb.Value{Unicode: []byte("v2.5"), Rev: 9},
+	}
+	for i, test := range []struct {
 		key    string
 		rev    int64
 		vers   bool
 		values []*pb.Value
 		err    error
 	}{
-		{"k1", 0, false, values[len(values)-1:], nil},
-		{"k1", 0, true, values, nil},
-		{"k1", -1, false, values[len(values)-1:], nil},
-		{"k1", -1, true, values, nil},
+		// test get default with and without history
+		{"k1", 0, false, values1[len(values1)-1:], nil},
+		{"k1", 0, true, values1, nil},
+		{"k1", -1, false, values1[len(values1)-1:], nil},
+		{"k1", -1, true, values1, nil},
 
-		{"k1", 1, true, values[0:], nil},
-		{"k1", 2, true, values[1:], nil},
-		{"k1", 3, true, values[2:], nil},
-		{"k1", 4, true, values[3:], nil},
+		// test get all revisions
+		{"k1", 1, true, values1[0:], nil},
+		{"k1", 3, true, values1[1:], nil},
+		{"k1", 4, true, values1[2:], nil},
+		{"k1", 5, true, values1[3:], nil},
 
-		{"k1", 1, false, values[0:1], nil},
-		{"k1", 2, false, values[1:2], nil},
-		{"k1", 3, false, values[2:3], nil},
-		{"k1", 4, false, values[3:4], nil},
+		// test get at revision
+		{"k1", 1, false, values1[0:1], nil},
+		{"k1", 3, false, values1[1:2], nil},
+		{"k1", 4, false, values1[2:3], nil},
+		{"k1", 5, false, values1[3:4], nil},
 
-		{"k1", 5, false, nil, errRevisionNotFound},
-		{"k1", 5, true, nil, errRevisionNotFound},
+		// test get default with and without history
+		{"k2", 1, true, nil, errRevisionNotFound},
+		{"k2", 1, true, nil, errRevisionNotFound},
+		{"k2", 2, false, nil, errRevisionNotFound},
+		{"k2", 2, true, nil, errRevisionNotFound},
+		{"k2", 3, false, nil, errRevisionNotFound},
+		{"k2", 3, true, nil, errRevisionNotFound},
+		{"k2", 4, false, nil, errRevisionNotFound},
+		{"k2", 4, true, nil, errRevisionNotFound},
+		{"k2", 5, false, nil, errRevisionNotFound},
+		{"k2", 5, true, nil, errRevisionNotFound},
+		{"k2", 6, false, nil, errRevisionNotFound},
+		{"k2", 6, false, nil, errRevisionNotFound},
+		{"k2", 7, true, nil, errRevisionNotFound},
+		{"k2", 7, true, nil, errRevisionNotFound},
+		{"k2", 8, false, nil, errRevisionNotFound},
+		{"k2", 8, true, nil, errRevisionNotFound},
+		{"k2", 9, false, values2[len(values2)-1:], nil},
+		{"k2", 9, true, values2[len(values2)-1:], nil},
+
+		// test revision not found
+		{"k1", 10, false, nil, errRevisionNotFound},
+		{"k1", 10, true, nil, errRevisionNotFound},
+		{"k1", 2, false, nil, errRevisionNotFound},
+		{"k1", 2, true, nil, errRevisionNotFound},
+
+		// test key not found
 		{"k99", 5, true, nil, errKeyNotFound},
 		{"k99", 5, false, nil, errKeyNotFound},
+		{"k99", 0, true, nil, errKeyNotFound},
+		{"k99", 0, false, nil, errKeyNotFound},
+		{"k99", -1, true, nil, errKeyNotFound},
+		{"k99", -1, false, nil, errKeyNotFound},
 	} {
 		want.Values = test.values
 		rec, err := db.Get([]byte(test.key), test.rev, test.vers)
 		if err != test.err {
-			t.Fatalf("insert: expected error %v, have %v", test.err, err)
+			t.Fatalf("insert #%d: expected error %v, have %v", i, test.err, err)
 		}
 		if test.values == nil {
 			continue
 		}
 		if !reflect.DeepEqual(want, rec) {
-			t.Fatalf("insert: record differ:\n%+v\n%+v", want, rec)
+			t.Fatalf("insert #%d: record differ:\n%+v\n%+v", i, want, rec)
 		}
 	}
 }
