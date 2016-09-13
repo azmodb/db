@@ -2,6 +2,7 @@ package db
 
 import "github.com/azmodb/llrb"
 
+// Batch represents a batch transaction on the database.
 type Batch struct {
 	txn *llrb.Txn
 	rev int64
@@ -42,6 +43,8 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 	return parent.last(b.rev), nil
 }
 
+// Decrement decrements the value for a key. Returns an error if the key
+// contains an unicode value.
 func (b *Batch) Decrement(key []byte, value int64, prev bool) (*Record, error) {
 	rec, err := b.insert(key, value*-1, false, prev)
 	if err != nil {
@@ -51,6 +54,8 @@ func (b *Batch) Decrement(key []byte, value int64, prev bool) (*Record, error) {
 	return rec, nil
 }
 
+// Increment increments the value for a key. Returns an error if the key
+// contains an unicode value.
 func (b *Batch) Increment(key []byte, value int64, prev bool) (*Record, error) {
 	rec, err := b.insert(key, value, false, prev)
 	if err != nil {
@@ -60,15 +65,10 @@ func (b *Batch) Increment(key []byte, value int64, prev bool) (*Record, error) {
 	return rec, nil
 }
 
-func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
-	rec, err := b.insert(key, value, false, prev)
-	if err != nil {
-		rec.Close()
-		return nil, err
-	}
-	return rec, nil
-}
-
+// Put sets the value for a key. If the key exists then its previous
+// versions will be overwritten. Supplied key and value must not remain
+// valid for the life of the batch. Returns an error if the key contains
+// an unicode value.
 func (b *Batch) Put(key []byte, value []byte, prev bool) (*Record, error) {
 	rec, err := b.insert(key, value, true, prev)
 	if err != nil {
@@ -78,12 +78,32 @@ func (b *Batch) Put(key []byte, value []byte, prev bool) (*Record, error) {
 	return rec, nil
 }
 
+// Insert inserts the value for a key. If the key exists then a new
+// version will be created. Supplied key and value must not remain valid
+// for the life of the batch. Returns an error if the key contains a
+// numeric value.
+func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
+	rec, err := b.insert(key, value, false, prev)
+	if err != nil {
+		rec.Close()
+		return nil, err
+	}
+	return rec, nil
+}
+
+// Delete removes a key/value pair. If the key does not exist then
+// nothing is done and nil error is returned.
 func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
 	return nil, nil
 }
 
+// Rev returns the current revision of the database.
 func (b *Batch) Rev() int64 { return b.rev }
 
+// Next starts a new batch transaction. Only one batch transaction can
+// be used at a time. Starting multiple batch transactions will cause
+// the calls to block and be serialized until the current transaction
+// finishes.
 func (db *DB) Next() *Batch {
 	db.writer.Lock()
 	tree := db.load()

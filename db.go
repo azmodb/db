@@ -26,6 +26,8 @@ var (
 )
 
 // DB represents an immutable, consistent, im-memory key/value database.
+// All access is performed through a batch with can be obtained through
+// the database.
 type DB struct {
 	archive sync.Mutex // exclusive archive transaction
 	writer  sync.Mutex // exclusive writer transaction
@@ -61,7 +63,7 @@ func (db *DB) Rev() int64 {
 	return tree.rev
 }
 
-// Len returns the number of keys in the database.
+// Len returns the number of keys inside the database.
 func (db *DB) Len() int {
 	tree := db.load()
 	return tree.root.Len()
