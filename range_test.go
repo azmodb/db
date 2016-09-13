@@ -17,7 +17,7 @@ var (
 	}
 )
 
-func testDefaultRange(t *testing.T, db *DB) {
+func testRevisionForEach(t *testing.T, db *DB) {
 	testFunc := func(i int, values []*pb.Value) RangeFunc {
 		return func(key []byte, rec *Record) bool {
 			if !reflect.DeepEqual(values, rec.Values) {
@@ -35,6 +35,7 @@ func testDefaultRange(t *testing.T, db *DB) {
 		values   []*pb.Value
 		fn       func(i int, values []*pb.Value) RangeFunc
 	}{
+		// test ForEach
 		{nil, nil, -1, false, wantRec1.Values[len(wantRec1.Values)-1:], testFunc},
 		{nil, nil, -1, true, wantRec1.Values, testFunc},
 		{nil, nil, 0, false, wantRec1.Values[len(wantRec1.Values)-1:], testFunc},
@@ -51,6 +52,31 @@ func testDefaultRange(t *testing.T, db *DB) {
 		{nil, nil, 4, true, nil, testFunc},
 		{nil, nil, 5, false, nil, testFunc},
 		{nil, nil, 5, true, nil, testFunc},
+
+		// test ForEach with end marker
+		{nil, []byte("k2"), -1, false, wantRec1.Values[len(wantRec1.Values)-1:], testFunc},
+		{nil, []byte("k2"), -1, true, wantRec1.Values, testFunc},
+		{nil, []byte("k2"), 0, false, wantRec1.Values[len(wantRec1.Values)-1:], testFunc},
+		{nil, []byte("k2"), 0, true, wantRec1.Values, testFunc},
+
+		{nil, []byte("k1"), -1, false, nil, testFunc},
+		{nil, []byte("k1"), -1, true, nil, testFunc},
+		{nil, []byte("k1"), 0, false, nil, testFunc},
+		{nil, []byte("k1"), 0, true, nil, testFunc},
+
+		{nil, []byte("k2"), 1, false, wantRec1.Values[0:1], testFunc},
+		{nil, []byte("k2"), 2, false, wantRec1.Values[1:2], testFunc},
+		{nil, []byte("k2"), 3, false, wantRec1.Values[2:3], testFunc},
+		{nil, []byte("k2"), 1, true, wantRec1.Values[0:], testFunc},
+		{nil, []byte("k2"), 2, true, wantRec1.Values[1:], testFunc},
+		{nil, []byte("k2"), 3, true, wantRec1.Values[2:], testFunc},
+
+		{nil, []byte("k1"), 1, false, nil, testFunc},
+		{nil, []byte("k1"), 2, false, nil, testFunc},
+		{nil, []byte("k1"), 3, false, nil, testFunc},
+		{nil, []byte("k1"), 1, true, nil, testFunc},
+		{nil, []byte("k1"), 2, true, nil, testFunc},
+		{nil, []byte("k1"), 3, true, nil, testFunc},
 	}
 	for i, test := range tests {
 		db.Range(test.from, test.to, test.rev, test.vers, test.fn(i, test.values))
@@ -65,5 +91,5 @@ func TestRevisionRange(t *testing.T) {
 	b.Insert([]byte("k1"), []byte("v1.3"), false)
 	b.Commit()
 
-	testDefaultRange(t, db)
+	testRevisionForEach(t, db)
 }
