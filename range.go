@@ -23,7 +23,6 @@ func rangeFunc(end []byte, rev, cur int64, vers bool, fn RangeFunc) llrb.Visitor
 				rec = p.from(index, cur)
 			} else {
 				rec = p.at(index, cur)
-				//rec = p.last(cur)
 			}
 		} else {
 			if vers {
