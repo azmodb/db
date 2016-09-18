@@ -36,6 +36,7 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 		p = newPair(key, value, b.rev)
 	}
 	b.txn.Insert(p)
+	b.db.notify(p, b.rev)
 
 	if !prev || parent == nil {
 		return nil, nil
@@ -94,7 +95,7 @@ func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
 // Delete removes a key/value pair. If the key does not exist then
 // nothing is done and nil error is returned.
 func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
-	return nil, nil
+	panic("not implemented")
 }
 
 // Rev returns the current revision of the database.

@@ -32,6 +32,9 @@ type DB struct {
 	archive sync.Mutex // exclusive archive transaction
 	writer  sync.Mutex // exclusive writer transaction
 	tree    unsafe.Pointer
+
+	mu  sync.RWMutex // protects notifier registry
+	reg map[string]*notifier
 }
 
 type tree struct {
@@ -46,7 +49,10 @@ func newDB(t *tree) *DB {
 	if t == nil {
 		t = &tree{root: &llrb.Tree{}}
 	}
-	return &DB{tree: unsafe.Pointer(t)}
+	return &DB{
+		reg:  make(map[string]*notifier),
+		tree: unsafe.Pointer(t),
+	}
 }
 
 func (db *DB) store(t *tree) {
