@@ -147,8 +147,6 @@ func (w *Watcher) send(rec *Record) {
 	w.state.Unlock()
 }
 
-//func (w *Watcher) Rev() int64 { return w.db.Rev() }
-
 func (w *Watcher) ID() int64 { return w.id }
 
 func (w *Watcher) Close() {
