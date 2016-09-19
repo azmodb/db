@@ -2,16 +2,22 @@ syntax = "proto3";
 package db;
 option go_package = "pb";
 
+enum Type {
+	Invalid = 0;
+	Numeric = 1;
+	Unicode = 2;
+}
+
 message Record {
 	repeated Value values = 1;
-	int32 type = 2;
+	Type type = 2;
 	int64 current = 3;
 }
 
 message Pair {
 	repeated Value values = 1;
 	bytes key = 2;
-	int32 type = 3;
+	Type type = 3;
 }
 
 message Value {
