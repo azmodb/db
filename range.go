@@ -36,6 +36,13 @@ func rangeFunc(end []byte, rev, cur int64, vers bool, fn RangeFunc) llrb.Visitor
 	}
 }
 
+// Range perform fn on all values stored in the tree over the interval
+// [from, to) from left to right.
+// If from is nil and to is nil it gets the keys in range [first, last].
+// If from is nil and to is not nil it gets the keys in range
+// [first, to].
+// If from is not nil and to is not nil it gets the keys in range
+// [from, to).
 func (db *DB) Range(from, to []byte, rev int64, vers bool, fn RangeFunc) {
 	tree := db.load()
 	if from == nil && to == nil {
@@ -63,8 +70,13 @@ func (db *DB) Range(from, to []byte, rev int64, vers bool, fn RangeFunc) {
 	tree.root.Range(fmatch, tmatch, rangeFunc(nil, rev, tree.rev, vers, fn))
 }
 
+// RangeFunc is a function that operates on a key/value pair. If done is
+// returned true, the RangeFunc is indicating that no further work needs
+// to be done and so the traversal function should traverse no further.
 type RangeFunc func(key []byte, rec *Record) (done bool)
 
+// Get retrieves the value for a key at revision rev. If rev <= 0 Get
+// returns the current value for a key.
 func (db *DB) Get(key []byte, rev int64, vers bool) (rec *Record, err error) {
 	rec, err = db.get(key, rev, vers)
 	return rec, err
