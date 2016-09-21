@@ -13,7 +13,7 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 	match := newMatcher(key)
 	defer match.Close()
 
-	b.rev++ // increment batch revision
+	rev := b.rev + 1 // increment batch revision
 	var p, parent *pair
 	if elem := b.txn.Get(match); elem != nil {
 		_, isNum := value.(int64)
@@ -25,23 +25,24 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 
 		if !p.isNum() {
 			if ts {
-				p.tombstone(value, b.rev)
+				p.tombstone(value, rev)
 			} else {
-				p.append(value, b.rev)
+				p.append(value, rev)
 			}
 		} else {
-			p.increment(value, b.rev)
+			p.increment(value, rev)
 		}
 	} else { // element does not exists
-		p = newPair(key, value, b.rev)
+		p = newPair(key, value, rev)
 	}
 	b.txn.Insert(p)
-	//b.db.notify(p, b.rev)
+	//b.db.notify(p, rev)
+	b.rev = rev
 
 	if !prev || parent == nil {
 		return nil, nil
 	}
-	return parent.last(b.rev), nil
+	return parent.last(rev), nil
 }
 
 // Decrement decrements the value for a key. Returns an error if the key
