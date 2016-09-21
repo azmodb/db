@@ -1,4 +1,4 @@
-// Package db implements an immutable, consistent, im-memory key/value
+// Package db implements an immutable, consistent, in-memory key/value
 // database.
 package db
 
@@ -25,7 +25,7 @@ var (
 	errIncompatibleValue = errors.New("incompatible value")
 )
 
-// DB represents an immutable, consistent, im-memory key/value database.
+// DB represents an immutable, consistent, in-memory key/value database.
 // All access is performed through a batch with can be obtained through
 // the database.
 type DB struct {
@@ -42,7 +42,7 @@ type tree struct {
 	rev  int64
 }
 
-// New returns an immutable, consistent, im-memory key/value database.
+// New returns an immutable, consistent, in-memory key/value database.
 func New() *DB { return newDB(nil) }
 
 func newDB(t *tree) *DB {
