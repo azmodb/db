@@ -35,8 +35,9 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 	} else { // element does not exists
 		p = newPair(key, value, rev)
 	}
-	b.txn.Insert(p)
-	//b.db.notify(p, rev)
+
+	b.txn.Insert(p)     // insert key/value pair
+	b.db.notify(p, rev) // notify watchers
 	b.rev = rev
 
 	if !prev || parent == nil {
