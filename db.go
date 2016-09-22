@@ -1,5 +1,25 @@
 // Package db implements an immutable, consistent, in-memory key/value
-// database.
+// database. DB uses a immutable Left-Leaning Red-Black tree (LLRB)
+// internally and supports snapshotting.
+//
+// Basic example:
+//
+//	db := New()
+//	batch := db.Next()
+//	batch.Insert([]byte("k1"), []byte("v1.1"), false)
+//	batch.Insert([]byte("k1"), []byte("v1.2"), false)
+//	batch.Insert([]byte("k1"), []byte("v1.3"), false)
+//
+//	batch.Put([]byte("k2"), []byte("v2.1"), false)
+//	batch.Put([]byte("k2"), []byte("v2.2"), false)
+//	batch.Commit()
+//
+//	fn := func(key []byte, rec *Record) bool {
+//		fmt.Printf("%s - %s\n", key, rec.Values)
+//		return false
+//	}
+//	db.Range(nil, nil, 0, true, fn)
+//
 package db
 
 import (
