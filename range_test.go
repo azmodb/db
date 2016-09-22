@@ -1,9 +1,11 @@
 package db
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
+	"github.com/azmodb/db/backend"
 	"github.com/azmodb/db/pb"
 )
 
@@ -92,4 +94,38 @@ func TestRevisionRange(t *testing.T) {
 	b.Commit()
 
 	testRevisionForEach(t, db)
+}
+
+func TestDeletedGet(t *testing.T) {
+	db := New()
+	b := db.Next()
+	b.Insert([]byte("k1"), []byte("v1"), false)
+	b.Delete([]byte("k1"), false)
+	b.Commit()
+
+	if db.Len() != 1 {
+		t.Fatalf("expected 1 element, have %d", db.Len())
+	}
+
+	_, err := db.Get([]byte("k1"), 0, false)
+	if err != errKeyNotFound {
+		t.Fatalf("expected error %v, have %v", errKeyNotFound, err)
+	}
+
+	backend, err := backend.Open("test_deleted_get.db", 0)
+	if err != nil {
+		t.Fatalf("open backend: %v", err)
+	}
+	defer func() {
+		backend.Close()
+		os.RemoveAll("test_deleted_get.db")
+	}()
+
+	if _, err = db.Snapshot(backend); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+
+	if db.Len() != 0 {
+		t.Fatalf("expected 0 elements, have %d", db.Len())
+	}
 }

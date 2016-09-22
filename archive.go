@@ -15,6 +15,7 @@ func (db *DB) Snapshot(backend backend.Backend) (rev int64, err error) {
 		return rev, err
 	}
 
+	var deleted []*pair
 	tree := db.load()
 	rev = tree.rev
 	failed := tree.root.ForEach(func(elem llrb.Element) bool {
@@ -32,6 +33,7 @@ func (db *DB) Snapshot(backend backend.Backend) (rev int64, err error) {
 			if err = tx.Delete(p.Pair); err != nil {
 				return true
 			}
+			deleted = append(deleted, p)
 		}
 		return false
 	})
@@ -42,7 +44,18 @@ func (db *DB) Snapshot(backend backend.Backend) (rev int64, err error) {
 		}
 		return rev, err
 	}
-	return rev, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return rev, err
+	}
+
+	if len(deleted) > 0 {
+		b := db.Next()
+		for _, p := range deleted {
+			b.txn.Delete(p)
+		}
+		b.Commit()
+	}
+	return rev, nil
 }
 
 func Open(backend backend.Backend) (*DB, error) {

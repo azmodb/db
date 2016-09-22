@@ -35,7 +35,7 @@ func rangeFunc(end []byte, rev, cur int64, vers bool, fn RangeFunc) llrb.Visitor
 				rec = p.last(cur)
 			}
 		}
-		return fn(p.Key, rec) // TODO: document, rangeFunc does not copy key
+		return fn(p.Key, rec)
 	}
 }
 
@@ -76,6 +76,7 @@ func (db *DB) Range(from, to []byte, rev int64, vers bool, fn RangeFunc) {
 // RangeFunc is a function that operates on a key/value pair. If done is
 // returned true, the RangeFunc is indicating that no further work needs
 // to be done and so the traversal function should traverse no further.
+// The key must be kept immutable.
 type RangeFunc func(key []byte, rec *Record) (done bool)
 
 // Get retrieves the value for a key at revision rev. If rev <= 0 Get
