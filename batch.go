@@ -94,9 +94,18 @@ func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
 }
 
 // Delete removes a key/value pair. If the key does not exist then
-// nothing is done and nil error is returned.
+// an error is returned.
 func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
-	panic("not implemented")
+	match := newMatcher(key)
+	defer match.Close()
+
+	if elem := b.txn.Get(match); elem != nil {
+		p := elem.(*pair)
+		b.rev++
+		b.txn.Delete(match)
+		return p.last(b.rev), nil
+	}
+	return nil, errKeyNotFound
 }
 
 // Rev returns the current revision of the database.
