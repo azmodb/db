@@ -9,6 +9,10 @@ import (
 func rangeFunc(end []byte, rev, cur int64, vers bool, fn RangeFunc) llrb.Visitor {
 	return func(elem llrb.Element) bool {
 		p := elem.(*pair)
+		if p.isDeleted() {
+			return false
+		}
+
 		if end != nil && bytes.Compare(p.Key, end) >= 0 {
 			return true
 		}
@@ -89,6 +93,10 @@ func (db *DB) get(key []byte, rev int64, vers bool) (*Record, error) {
 
 	if elem := tree.root.Get(match); elem != nil {
 		p := elem.(*pair)
+		if p.isDeleted() {
+			return nil, errKeyNotFound
+		}
+
 		var rec *Record
 		if rev > 0 {
 			index, found := p.find(rev, true)

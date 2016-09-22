@@ -4,8 +4,8 @@ import "sync"
 
 type notifier struct {
 	mu sync.Mutex // protects watchers
-	m  map[int64]*Watcher
-	id int64
+	m  map[int]*Watcher
+	id int
 
 	notifyc chan struct{}
 	donec   chan struct{}
@@ -22,7 +22,7 @@ type signal struct {
 
 func newNotifier() *notifier {
 	n := &notifier{
-		m:       make(map[int64]*Watcher),
+		m:       make(map[int]*Watcher),
 		notifyc: make(chan struct{}),
 		donec:   make(chan struct{}),
 		sigc:    make(chan signal),
@@ -90,7 +90,7 @@ func (n *notifier) Add() *Watcher {
 	return w
 }
 
-func (n *notifier) Delete(id int64) {
+func (n *notifier) Delete(id int) {
 	n.state.Lock()
 	if n.shutdown {
 		n.state.Unlock()
@@ -102,7 +102,7 @@ func (n *notifier) Delete(id int64) {
 
 type Watcher struct {
 	ch       chan *Record
-	id       int64
+	id       int
 	n        *notifier
 	state    sync.Mutex
 	shutdown bool
@@ -147,7 +147,7 @@ func (w *Watcher) send(rec *Record) {
 	w.state.Unlock()
 }
 
-func (w *Watcher) ID() int64 { return w.id }
+func (w *Watcher) ID() int { return w.id }
 
 func (w *Watcher) Close() {
 	w.state.Lock()

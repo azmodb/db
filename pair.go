@@ -44,6 +44,7 @@ func newRecord(values []*pb.Value, vtype pb.Type, cur int64) *Record {
 	return rec
 }
 
+// Close releases the record, rendering it unusable.
 func (r *Record) Close() {
 	if r == nil || r.Record == nil {
 		return
@@ -58,6 +59,8 @@ func (r *Record) Close() {
 	r = nil
 }
 
+// Copy created a copy of r. The copy should be closed after done with
+// it.
 func (r *Record) Copy() *Record {
 	if r == nil || r.Record == nil {
 		return nil
@@ -90,11 +93,19 @@ func (r *Record) Copy() *Record {
 	return rec
 }
 
+type state uint32
+
+const (
+	archived = 0x80000000
+	dirty    = 0x40000000
+	deleted  = 0x20000000
+)
+
 // pair represents an internal immutable key/value pair. A pair value can
 // be of type []byte (unicode) or int64 (numeric).
 type pair struct {
-	state sync.Mutex // protects key/value state
-	dirty bool
+	mu    sync.Mutex // protects key/value state
+	state state
 
 	*pb.Pair
 }
@@ -103,7 +114,7 @@ type pair struct {
 // can be of type []byte (unicode) or int64 (numeric). Supplies key
 // and value can be reused.
 func newPair(key []byte, value interface{}, rev int64) *pair {
-	p := &pair{Pair: &pb.Pair{Key: bcopy(key)}, dirty: true}
+	p := &pair{Pair: &pb.Pair{Key: bcopy(key)}, state: dirty}
 
 	var val *pb.Value
 	switch t := value.(type) {
@@ -160,7 +171,7 @@ func (p *pair) copy() *pair {
 			Key:    p.Key,
 			Type:   p.Type,
 		},
-		dirty: true,
+		state: dirty,
 	}
 	for _, val := range p.Values {
 		switch {
@@ -265,3 +276,7 @@ func (p *pair) last(current int64) *Record {
 }
 
 func (p *pair) isNum() bool { return p.Type == pb.Numeric }
+
+func (p *pair) isArchived() bool { return p.state&archived != 0 }
+func (p *pair) isDeleted() bool  { return p.state&deleted != 0 }
+func (p *pair) isDirty() bool    { return p.state&dirty != 0 }

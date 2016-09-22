@@ -16,9 +16,10 @@ func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, e
 	rev := b.rev + 1 // increment batch revision
 	var p, parent *pair
 	if elem := b.txn.Get(match); elem != nil {
-		_, isNum := value.(int64)
 		parent = elem.(*pair)
 		p = parent.copy()
+
+		_, isNum := value.(int64)
 		if (isNum && !p.isNum()) || (!isNum && p.isNum()) {
 			return nil, errIncompatibleValue
 		}
@@ -103,7 +104,10 @@ func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
 	if elem := b.txn.Get(match); elem != nil {
 		p := elem.(*pair)
 		b.rev++
-		b.txn.Delete(match)
+		//b.txn.Delete(match)
+		p.mu.Lock()
+		p.state = deleted
+		p.mu.Unlock()
 		return p.last(b.rev), nil
 	}
 	return nil, errKeyNotFound
