@@ -29,9 +29,8 @@ var (
 // All access is performed through a batch with can be obtained through
 // the database.
 type DB struct {
-	archive sync.Mutex // exclusive archive transaction
-	writer  sync.Mutex // exclusive writer transaction
-	tree    unsafe.Pointer
+	writer sync.Mutex // exclusive writer transaction
+	tree   unsafe.Pointer
 
 	mu  sync.RWMutex // protects notifier registry
 	reg map[string]*notifier
