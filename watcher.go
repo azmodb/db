@@ -35,10 +35,9 @@ func (n *notifier) run() {
 	for {
 		select {
 		case s := <-n.sigc:
-			rec := s.last(s.cur)
 			n.mu.Lock()
 			for _, w := range n.m {
-				w.send(rec)
+				w.send(s.last(s.cur))
 			}
 			n.mu.Unlock()
 		case <-n.donec:
