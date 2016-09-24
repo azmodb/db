@@ -40,12 +40,12 @@ func rangeFunc(end []byte, rev, cur int64, vers bool, fn RangeFunc) llrb.Visitor
 }
 
 // Range perform fn on all values stored in the tree over the interval
-// [from, to) from left to right.
+// [from, to] from left to right.
 // If from is nil and to is nil it gets the keys in range [first, last].
 // If from is nil and to is not nil it gets the keys in range
 // [first, to].
 // If from is not nil and to is not nil it gets the keys in range
-// [from, to).
+// [from, to].
 func (db *DB) Range(from, to []byte, rev int64, vers bool, fn RangeFunc) {
 	tree := db.load()
 	if from == nil && to == nil {
