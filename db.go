@@ -1,5 +1,5 @@
 // Package db implements an immutable, consistent, in-memory key/value
-// database. DB uses a immutable Left-Leaning Red-Black tree (LLRB)
+// database. DB uses an immutable Left-Leaning Red-Black tree (LLRB)
 // internally and supports snapshotting.
 //
 // Basic example:
