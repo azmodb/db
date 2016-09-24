@@ -8,6 +8,6 @@
 > **You have been warned**
 
 Package db implements an immutable, consistent, in-memory key/value store.
-DB uses a immutable Left-Leaning Red-Black tree (LLRB) internally and
+DB uses an immutable Left-Leaning Red-Black tree (LLRB) internally and
 supports snapshotting.
 

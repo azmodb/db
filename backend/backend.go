@@ -1,3 +1,4 @@
+// Package backend implements the AzmoDB persistent database interface.
 package backend
 
 import (
@@ -9,33 +10,62 @@ import (
 	"github.com/boltdb/bolt"
 )
 
+// Backend represents a persistent key/value database. All data access is
+// performed through transactions wich can be obtained through the DB.
 type Backend interface {
+	// Range ranges over all pairs inside the database.
 	Range(fn func(pair *pb.Pair) error) error
+
+	// Next starts a new transaction. Only one write transaction can be
+	// used at a time. Starting multiple write transactions will cause
+	// the calls to block and be serialized until the current write
+	// transaction finishes.
 	Next() (Txn, error)
+
+	// Close releases all database resources. All transactions must be
+	// closed before closing the database.
 	Close() error
 }
 
+// Txn represents a transaction on the database.
 type Txn interface {
+	// Put sets a pair. If the pair exists then its previous value will
+	// be overwritten.
 	Put(pair *pb.Pair, rev int64) error
+
+	// Delete deletes the pair. If the pair does not exist then nothing
+	// is done and a nil error is returned.
 	Delete(pair *pb.Pair) error
+
+	// Commit writes all changes to disk. Commit returns an error if a
+	// disk write error occures.
 	Commit() error
+
+	// Rollback closes the transaction and ignores all previous updates.
 	Rollback() error
 }
 
 var (
-	_ Backend = (*BoltDB)(nil) // BoltDB implements Backend
-	_ Txn     = (*txn)(nil)    // txn implements Txn
+	_ Backend = (*DB)(nil)  // DB implements Backend
+	_ Txn     = (*txn)(nil) // txn implements Txn
 
 	rootBuckets = [][]byte{metaBucket, kvBucket}
 	metaBucket  = []byte("meta")
 	kvBucket    = []byte("kv")
 )
 
-type BoltDB struct {
+// DB represents the default Backend implementation.
+type DB struct {
 	db *bolt.DB
 }
 
-func Open(path string, timeout time.Duration) (*BoltDB, error) {
+// Open creates and opens a database at the give path. If the file does
+// not exist then it will be created automatically.
+//
+// Timeout is the amount of time to wait to obtain a file lock. When set
+// to zero it will wait indefinitely. This option is only available on
+// Darwin and Linux.
+func Open(path string, timeout time.Duration) (*DB, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{
 		Timeout: timeout,
 	})
@@ -55,11 +85,12 @@ func Open(path string, timeout time.Duration) (*BoltDB, error) {
 		return nil, err
 	}
 
-	return &BoltDB{db: db}, nil
+	return &DB{db: db}, nil
 }
 
-func (b *BoltDB) Range(fn func(pair *pb.Pair) error) error {
-	return b.db.View(func(tx *bolt.Tx) (err error) {
+// Range ranges over all pairs inside the database.
+func (db *DB) Range(fn func(pair *pb.Pair) error) error {
+	return db.db.View(func(tx *bolt.Tx) (err error) {
 		c := tx.Bucket(metaBucket).Cursor()
 		kv := tx.Bucket(kvBucket)
 		info := &pb.PairInfo{}
@@ -85,8 +116,12 @@ func (b *BoltDB) Range(fn func(pair *pb.Pair) error) error {
 	})
 }
 
-func (b *BoltDB) Next() (Txn, error) {
-	tx, err := b.db.Begin(true)
+// Next starts a new transaction. Only one write transaction can be used
+// at a time. Starting multiple write transactions will cause the calls
+// to block and be serialized until the current write transaction
+// finishes.
+func (db *DB) Next() (Txn, error) {
+	tx, err := db.db.Begin(true)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +132,9 @@ func (b *BoltDB) Next() (Txn, error) {
 	}, nil
 }
 
-func (b *BoltDB) Close() error { return b.db.Close() }
+// Close releases all database resources. All transactions must be
+// closed before closing the database.
+func (db *DB) Close() error { return db.db.Close() }
 
 type txn struct {
 	meta *bolt.Bucket
