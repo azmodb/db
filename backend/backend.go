@@ -48,7 +48,9 @@ type Txn interface {
 var (
 	_ Backend = (*DB)(nil)  // DB implements Backend
 	_ Txn     = (*txn)(nil) // txn implements Txn
+)
 
+var (
 	rootBuckets = [][]byte{metaBucket, kvBucket}
 	metaBucket  = []byte("meta")
 	kvBucket    = []byte("kv")
