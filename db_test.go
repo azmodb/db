@@ -98,12 +98,9 @@ func TestBasicInsertPutGet(t *testing.T) {
 		/* 0016 */ basicResult{&Record{&pb.Record{[]*pb.Block{
 			&pb.Block{Unicode: []byte("v2"), Revision: 4},
 		}, pb.Record_Unicode}}, 5, nil},
-		/* 0017 */ basicResult{&Record{&pb.Record{[]*pb.Block{
-			&pb.Block{Unicode: []byte("v2"), Revision: 4},
-		}, pb.Record_Unicode}}, 5, nil},
-		/* 0018 */ basicResult{&Record{&pb.Record{[]*pb.Block{
-			&pb.Block{Unicode: []byte("v2"), Revision: 4},
-		}, pb.Record_Unicode}}, 5, nil},
+
+		/* 0017 */ basicResult{nil, 5, errRevisionNotFound},
+		/* 0018 */ basicResult{nil, 5, errRevisionNotFound},
 
 		// error results
 		/* 0018 */ basicResult{nil, 5, errRevisionNotFound},

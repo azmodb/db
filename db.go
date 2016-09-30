@@ -184,7 +184,7 @@ func (db *DB) Get(key string, rev int64, history bool) (*Record, int64, error) {
 		p := elem.(*pair)
 
 		if rev > 0 {
-			index, found := p.find(rev, false)
+			index, found := p.find(rev, true)
 			if !found {
 				return nil, tree.rev, errRevisionNotFound
 			}
