@@ -1,0 +1,20 @@
+syntax = "proto3";
+package db;
+option go_package = "pb";
+
+message Record {
+	repeated Block blocks = 1;
+
+	enum BlockType {
+		Invalid = 0;
+		Numeric = 1;
+		Unicode = 2;
+	}
+	BlockType type = 2;
+}
+
+message Block {
+	int64 revision = 1;
+	bytes unicode = 2;
+	int64 numeric = 3;
+}

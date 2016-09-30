@@ -34,19 +34,19 @@ func TestNotifierClose(t *testing.T) {
 	n.Close()
 	n.Close()
 
-	n.Notify(nil, 0)
-	n.Notify(nil, 0)
-	n.Notify(nil, 0)
+	n.Notify(signal{})
+	n.Notify(signal{})
+	n.Notify(signal{})
 }
 
 func TestBasicWatcher(t *testing.T) {
 	count := 10
 	db := New()
 	b := db.Next()
-	b.Insert([]byte("k"), []byte("v0"), false)
+	b.Insert("k", []byte("v0"), false)
 	b.Commit()
 
-	w, err := db.Watch([]byte("k"))
+	w, _, err := db.Watch("k")
 	if err != nil {
 		t.Fatalf("create watcher: %v", err)
 	}
@@ -62,9 +62,8 @@ func TestBasicWatcher(t *testing.T) {
 		defer close(done)
 
 		i := 0
-		for rec := range w.Recv() {
-			result = append(result, rec.Values[0].Unicode)
-			rec.Close()
+		for ev := range w.Recv() {
+			result = append(result, ev.Blocks[0].Unicode)
 			i++
 			if i >= count {
 				break
@@ -73,9 +72,9 @@ func TestBasicWatcher(t *testing.T) {
 	}(done)
 
 	for i := 1; i <= count; i++ {
-		value := []byte(fmt.Sprintf("v%d", i))
+		block := []byte(fmt.Sprintf("v%d", i))
 		b = db.Next()
-		b.Insert([]byte("k"), value, false)
+		b.Insert("k", block, false)
 		b.Commit()
 	}
 

@@ -1,25 +1,3 @@
-// Package db implements an immutable, consistent, in-memory key/value
-// database. DB uses an immutable Left-Leaning Red-Black tree (LLRB)
-// internally and supports snapshotting.
-//
-// Basic example:
-//
-//	db := New()
-//	batch := db.Next()
-//	batch.Insert([]byte("k1"), []byte("v1.1"), false)
-//	batch.Insert([]byte("k1"), []byte("v1.2"), false)
-//	batch.Insert([]byte("k1"), []byte("v1.3"), false)
-//
-//	batch.Put([]byte("k2"), []byte("v2.1"), false)
-//	batch.Put([]byte("k2"), []byte("v2.2"), false)
-//	batch.Commit()
-//
-//	fn := func(key []byte, rec *Record) bool {
-//		fmt.Printf("%s - %s\n", key, rec.Values)
-//		return false
-//	}
-//	db.Range(nil, nil, 0, true, fn)
-//
 package db
 
 import (
@@ -28,6 +6,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/azmodb/db/pb"
 	"github.com/azmodb/llrb"
 )
 
@@ -45,13 +24,18 @@ var (
 	errIncompatibleValue = errors.New("incompatible value")
 )
 
+var (
+	recPool = sync.Pool{New: func() interface{} { return &Record{} }}
+	evPool  = sync.Pool{New: func() interface{} { return &Event{} }}
+)
+
 // DB represents an immutable, consistent, in-memory key/value database.
-// All access is performed through a batch with can be obtained through
-// the database.
+// All write access is performed through a batch with can be obtained
+// through the database.
 type DB struct {
-	archive sync.Mutex // exclusive archive transaction
-	writer  sync.Mutex // exclusive writer transaction
-	tree    unsafe.Pointer
+	writer   sync.Mutex // exclusive writer transaction
+	tree     unsafe.Pointer
+	writable bool
 
 	mu  sync.RWMutex // protects notifier registry
 	reg map[string]*notifier
@@ -83,6 +67,144 @@ func (db *DB) load() *tree {
 	return (*tree)(atomic.LoadPointer(&db.tree))
 }
 
+type Record struct {
+	*pb.Record
+}
+
+func newRecord(rec *pb.Record) *Record {
+	r := recPool.Get().(*Record)
+	r.Record = rec
+	return r
+}
+
+func (r *Record) Close() {
+	if r == nil || r.Record == nil {
+		return
+	}
+
+	rec := r.Record
+	closeProtobufRecord(rec)
+	r.Record = nil
+	r = nil
+}
+
+func (r *Record) IsNum() bool { return r.Type == pb.Record_Numeric }
+
+type Event struct {
+	current int64
+	*pb.Record
+}
+
+func newEvent(current int64, rec *pb.Record) *Event {
+	e := evPool.Get().(*Event)
+	e.current = current
+	e.Record = rec
+	return e
+}
+
+func (e *Event) Close() {
+	if e == nil || e.Record == nil {
+		return
+	}
+
+	rec := e.Record
+	closeProtobufRecord(rec)
+	e.Record = nil
+	e.current = 0
+	e = nil
+}
+
+func (e *Event) IsNum() bool { return e.Type == pb.Record_Numeric }
+
+// Rev returns the revision this event happend.
+func (e *Event) Rev() int64 { return e.current }
+
+type RangeFunc func(key string, ev *Event) (done bool)
+
+func walk(end string, rev, current int64, history bool, fn RangeFunc) llrb.Visitor {
+	return func(elem llrb.Element) bool {
+		p := elem.(*pair)
+		if end != "" && p.key >= end {
+			return true
+		}
+
+		var rec *pb.Record
+		if rev > 0 {
+			index, found := p.find(rev, false)
+			if !found { // revision not found
+				return false
+			}
+			if history {
+				rec = p.from(index)
+			} else {
+				rec = p.last()
+			}
+		} else {
+			if history {
+				rec = p.from(0)
+			} else {
+				rec = p.last()
+			}
+		}
+		return fn(p.key, newEvent(current, rec))
+	}
+}
+
+func (db *DB) Range(from, to string, rev int64, history bool, fn RangeFunc) {
+	if from > to {
+		return // invalid key sarch query range, report nothing
+	}
+
+	tree := db.load()
+	if from == "" && to == "" {
+		tree.root.ForEach(walk("", rev, tree.rev, history, fn))
+		return
+	}
+	if from == "" && to != "" {
+		tree.root.ForEach(walk(to, rev, tree.rev, history, fn))
+		return
+	}
+
+	fmatch, tmatch := newMatcher(from), newMatcher(to)
+	defer func() {
+		fmatch.release()
+		tmatch.release()
+	}()
+
+	tree.root.Range(fmatch, tmatch, walk("", rev, tree.rev, history, fn))
+}
+
+func (db *DB) Get(key string, rev int64, history bool) (*Record, int64, error) {
+	match := newMatcher(key)
+	defer match.release()
+	tree := db.load()
+
+	if elem := tree.root.Get(match); elem != nil {
+		var rec *pb.Record
+		p := elem.(*pair)
+
+		if rev > 0 {
+			index, found := p.find(rev, false)
+			if !found {
+				return nil, tree.rev, errRevisionNotFound
+			}
+			if history {
+				rec = p.from(index)
+			} else {
+				rec = p.at(index)
+			}
+		} else {
+			if history {
+				rec = p.from(0)
+			} else {
+				rec = p.last()
+			}
+		}
+		return newRecord(rec), tree.rev, nil
+	}
+	return nil, tree.rev, errKeyNotFound
+}
+
 // Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {
 	tree := db.load()
@@ -93,20 +215,4 @@ func (db *DB) Rev() int64 {
 func (db *DB) Len() int {
 	tree := db.load()
 	return tree.root.Len()
-}
-
-func bcopy(src []byte) []byte {
-	dst := make([]byte, len(src))
-	copy(dst, src)
-	return dst
-}
-
-func grow(dst, src []byte) []byte {
-	n := len(src)
-	if cap(dst) < n {
-		dst = make([]byte, n)
-	}
-	dst = dst[:n]
-	copy(dst, src)
-	return dst
 }

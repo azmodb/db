@@ -16,8 +16,8 @@ type notifier struct {
 }
 
 type signal struct {
-	*pair
-	cur int64
+	current int64
+	p       *pair
 }
 
 func newNotifier() *notifier {
@@ -34,10 +34,10 @@ func newNotifier() *notifier {
 func (n *notifier) run() {
 	for {
 		select {
-		case s := <-n.sigc:
+		case sig := <-n.sigc:
 			n.mu.Lock()
 			for _, w := range n.m {
-				w.send(s.last(s.cur))
+				w.send(newEvent(sig.current, sig.p.last()))
 			}
 			n.mu.Unlock()
 		case <-n.donec:
@@ -45,17 +45,6 @@ func (n *notifier) run() {
 			return
 		}
 	}
-}
-
-func (n *notifier) Notify(p *pair, cur int64) {
-	n.state.Lock()
-	if n.shutdown {
-		n.state.Unlock()
-		return
-	}
-
-	n.sigc <- signal{pair: p, cur: cur}
-	n.state.Unlock()
 }
 
 func (n *notifier) Close() {
@@ -70,6 +59,17 @@ func (n *notifier) Close() {
 	n.state.Unlock()
 }
 
+func (n *notifier) Notify(sig signal) {
+	n.state.Lock()
+	if n.shutdown {
+		n.state.Unlock()
+		return
+	}
+
+	n.sigc <- sig
+	n.state.Unlock()
+}
+
 func (n *notifier) Add() *Watcher {
 	n.state.Lock()
 	if n.shutdown {
@@ -79,7 +79,7 @@ func (n *notifier) Add() *Watcher {
 	n.mu.Lock()
 	n.id++
 	w := &Watcher{
-		ch: make(chan *Record),
+		ch: make(chan *Event),
 		n:  n,
 		id: n.id,
 	}
@@ -101,16 +101,18 @@ func (n *notifier) Delete(id int) {
 }
 
 type Watcher struct {
-	ch       chan *Record
+	ch       chan *Event
 	id       int
 	n        *notifier
 	state    sync.Mutex
 	shutdown bool
 }
 
-func (db *DB) Watch(key []byte) (*Watcher, error) {
+func (w *Watcher) Recv() <-chan *Event { return w.ch }
+
+func (db *DB) Watch(key string) (*Watcher, int64, error) {
 	match := newMatcher(key)
-	defer match.Close()
+	defer match.release()
 	tree := db.load()
 
 	if elem := tree.root.Get(match); elem != nil {
@@ -122,32 +124,26 @@ func (db *DB) Watch(key []byte) (*Watcher, error) {
 		}
 		watcher := n.Add()
 		db.mu.Unlock()
-		return watcher, nil
+		return watcher, tree.rev, nil
 	}
-	return nil, errKeyNotFound
+	return nil, tree.rev, errKeyNotFound
 }
 
-func (db *DB) notify(p *pair, cur int64) {
-	if n, found := db.reg[string(p.Key)]; found {
-		n.Notify(p, cur)
+func (db *DB) notify(p *pair, current int64) {
+	if n, found := db.reg[p.key]; found {
+		n.Notify(signal{current: current, p: p})
 	}
 }
 
-func (w *Watcher) Recv() <-chan *Record {
-	return w.ch
-}
-
-func (w *Watcher) send(rec *Record) {
+func (w *Watcher) send(ev *Event) {
 	w.state.Lock()
 	if w.shutdown {
 		w.state.Unlock()
 		return
 	}
-	w.ch <- rec
+	w.ch <- ev
 	w.state.Unlock()
 }
-
-func (w *Watcher) ID() int { return w.id }
 
 func (w *Watcher) Close() {
 	w.state.Lock()
@@ -159,3 +155,5 @@ func (w *Watcher) Close() {
 	w.n.Delete(w.id)
 	w.state.Unlock()
 }
+
+func (w *Watcher) ID() int { return w.id }

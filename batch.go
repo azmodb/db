@@ -2,118 +2,104 @@ package db
 
 import "github.com/azmodb/llrb"
 
-// Batch represents a batch transaction on the database.
+// Batch represents a batch transaction on the database. A Batch is not
+// thread safe.
 type Batch struct {
 	txn *llrb.Txn
 	rev int64
 	db  *DB
 }
 
-func (b *Batch) insert(key []byte, value interface{}, ts, prev bool) (*Record, error) {
+func (b *Batch) insert(key string, value interface{}, ts, prev bool) (*Record, int64, error) {
 	match := newMatcher(key)
-	defer match.Close()
+	defer match.release()
 
 	rev := b.rev + 1 // increment batch revision
 	var p, parent *pair
 	if elem := b.txn.Get(match); elem != nil {
 		parent = elem.(*pair)
-		p = parent.copy()
-
 		_, isNum := value.(int64)
-		if (isNum && !p.isNum()) || (!isNum && p.isNum()) {
-			return nil, errIncompatibleValue
+		if (isNum && !parent.isNum()) || (!isNum && parent.isNum()) {
+			return nil, b.rev, errIncompatibleValue
 		}
-
-		if !p.isNum() {
+		if !parent.isNum() {
 			if ts {
-				p.tombstone(value, rev)
+				p = parent.tombstone(value, rev)
 			} else {
-				p.append(value, rev)
+				p = parent.insert(value, rev)
 			}
 		} else {
-			p.increment(value, rev)
+			p = parent.increment(value, rev)
 		}
-	} else { // element does not exists
+	} else {
+		// Element does not exist. newPair create a copy if value is of type
+		// []byte.
 		p = newPair(key, value, rev)
 	}
 
 	b.txn.Insert(p)     // insert key/value pair
 	b.db.notify(p, rev) // notify watchers
-	b.rev = rev
+	b.rev = rev         // update batch revision
 
 	if !prev || parent == nil {
-		return nil, nil
+		return nil, b.rev, nil
 	}
-	return parent.last(rev), nil
+	return newRecord(parent.last()), b.rev, nil
 }
 
-// Decrement decrements the value for a key. Returns an error if the key
-// contains an unicode value.
-func (b *Batch) Decrement(key []byte, value int64, prev bool) (*Record, error) {
-	rec, err := b.insert(key, value*-1, false, prev)
+func (b *Batch) Decrement(key string, value int64, prev bool) (*Record, int64, error) {
+	rec, rev, err := b.insert(key, value*-1, false, prev)
 	if err != nil {
 		rec.Close()
-		return nil, err
+		return nil, rev, err
 	}
-	return rec, nil
+	return rec, rev, nil
 }
 
-// Increment increments the value for a key. Returns an error if the key
-// contains an unicode value.
-func (b *Batch) Increment(key []byte, value int64, prev bool) (*Record, error) {
-	rec, err := b.insert(key, value, false, prev)
+func (b *Batch) Increment(key string, value int64, prev bool) (*Record, int64, error) {
+	rec, rev, err := b.insert(key, value, false, prev)
 	if err != nil {
 		rec.Close()
-		return nil, err
+		return nil, rev, err
 	}
-	return rec, nil
+	return rec, rev, nil
 }
 
-// Put sets the value for a key. If the key exists then its previous
-// versions will be overwritten. Supplied key and value must not remain
-// valid for the life of the batch. Returns an error if the key contains
-// an unicode value.
-func (b *Batch) Put(key []byte, value []byte, prev bool) (*Record, error) {
-	rec, err := b.insert(key, value, true, prev)
+func (b *Batch) Insert(key string, value []byte, prev bool) (*Record, int64, error) {
+	rec, rev, err := b.insert(key, value, false, prev)
 	if err != nil {
 		rec.Close()
-		return nil, err
+		return nil, rev, err
 	}
-	return rec, nil
+	return rec, rev, nil
 }
 
-// Insert inserts the value for a key. If the key exists then a new
-// version will be created. Supplied key and value must not remain valid
-// for the life of the batch. Returns an error if the key contains a
-// numeric value.
-func (b *Batch) Insert(key []byte, value []byte, prev bool) (*Record, error) {
-	rec, err := b.insert(key, value, false, prev)
+func (b *Batch) Put(key string, value []byte, prev bool) (*Record, int64, error) {
+	rec, rev, err := b.insert(key, value, true, prev)
 	if err != nil {
 		rec.Close()
-		return nil, err
+		return nil, rev, err
 	}
-	return rec, nil
+	return rec, rev, nil
 }
 
-// Delete removes a key/value pair. If the key does not exist then
-// an error is returned.
-func (b *Batch) Delete(key []byte, prev bool) (*Record, error) {
+func (b *Batch) Delete(key string, prev bool) (*Record, int64, error) {
 	match := newMatcher(key)
-	defer match.Close()
+	defer match.release()
 
 	if elem := b.txn.Get(match); elem != nil {
-		p := elem.(*pair)
-		b.rev++
-		//b.txn.Delete(match)
-		p.mu.Lock()
-		p.state = deleted
-		p.mu.Unlock()
-		return p.last(b.rev), nil
+		b.txn.Delete(match) // delete pair from database
+		b.rev++             // update batch revision
+		if !prev {
+			return nil, b.rev, nil
+		}
+		parent := elem.(*pair)
+		return newRecord(parent.last()), b.rev, nil
 	}
-	return nil, errKeyNotFound
+	return nil, b.rev, errKeyNotFound
 }
 
-// Rev returns the current revision of the database.
+// Rev returns the current revision of the batch.
 func (b *Batch) Rev() int64 { return b.rev }
 
 // Next starts a new batch transaction. Only one batch transaction can
