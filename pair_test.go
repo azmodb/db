@@ -147,7 +147,7 @@ func TestPairFindGreateThan(t *testing.T) {
 }
 
 func TestBlockMarshalUnmarshal(t *testing.T) {
-	for i, src := range []block{
+	for _, src := range []block{
 		block{data: []byte("hello world"), rev: math.MaxInt64},
 		block{data: []byte("hello world"), rev: 42},
 	} {
@@ -159,11 +159,7 @@ func TestBlockMarshalUnmarshal(t *testing.T) {
 		}
 
 		dst := block{}
-		dn, err := dst.unmarshal(unicode, data)
-		if err != nil {
-			t.Fatalf("block: unmarshal block #%d failed: %v", i, err)
-		}
-
+		dn := dst.unmarshal(unicode, data)
 		if sn != dn {
 			t.Fatalf("block: source and destination length differ")
 		}

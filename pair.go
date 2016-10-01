@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -21,8 +20,6 @@ var (
 
 // maxPoolDataSize defines the maximal unicode type pool size.
 const maxPoolDataSize = 2 * 8192 // TODO: find capacity
-
-const maxInt = uint64(^uint(0) >> 1)
 
 const (
 	numeric byte = 0x01
@@ -87,48 +84,25 @@ func (b block) marshal(data []byte) (n int) {
 	return n
 }
 
-func (b *block) unmarshal(typ byte, data []byte) (n int, err error) {
-	var v uint64
-	var m int
-
+func (b *block) unmarshal(typ byte, data []byte) (n int) {
 	switch typ {
 	case unicode:
-		v, m, err = uvarint(data[n:])
+		size, m := varint(data[n:])
 		n += m
-		if err != nil {
-			return n, err
-		}
-		if v > maxInt {
-			return n, errors.New("block: integer overflow")
-		}
-		value := make([]byte, int(v))
-		n += copy(value, data[n:n+int(v)])
+		value := make([]byte, size)
+		n += copy(value, data[n:n+size])
 		b.data = value
 	case numeric:
-		v, m, err = uvarint(data[n:])
+		value, m := varint64(data[n:])
 		n += m
-		if err != nil {
-			return n, err
-		}
-		if v > math.MaxInt64 {
-			return n, errors.New("block: integer overflow")
-		}
-		b.data = int64(v)
+		b.data = value
 	default:
 		panic(fmt.Sprintf("block: unsupported data type (#%d)", typ))
 	}
 
-	v, m, err = uvarint(data[n:])
-	n += m
-	if err != nil {
-		return n, err
-	}
-	if v > math.MaxInt64 {
-		return n, errors.New("block: integer overflow")
-	}
-	b.rev = int64(v)
-
-	return n, err
+	rev, m := varint64(data[n:])
+	b.rev = rev
+	return n + m
 }
 
 // newPair returns an internal immutable key/value pair. A pair value
@@ -348,6 +322,8 @@ func clone(dst, src []byte) []byte {
 	return dst
 }
 
+const maxInt = uint64(^uint(0) >> 1)
+
 func uvarintSize(v uint64) (n int) {
 	for {
 		n++
@@ -359,13 +335,29 @@ func uvarintSize(v uint64) (n int) {
 	return n
 }
 
-func uvarint(data []byte) (uint64, int, error) {
+func uvarint64(data []byte) (uint64, int) {
 	v, n := binary.Uvarint(data)
 	if n < 0 {
-		return 0, n, errors.New("value larger than 64 bits")
+		panic("varint: value larger than 64 bits")
 	}
 	if n == 0 {
-		return 0, n, errors.New("buffer too small")
+		panic("varint: buffer too small")
 	}
-	return v, n, nil
+	return v, n
+}
+
+func varint64(data []byte) (int64, int) {
+	v, n := uvarint64(data)
+	if v > math.MaxInt64 {
+		panic(fmt.Sprintf("varint: int64 overflow: %d", v))
+	}
+	return int64(v), n
+}
+
+func varint(data []byte) (int, int) {
+	v, n := uvarint64(data)
+	if v > maxInt {
+		panic(fmt.Sprintf("varint: int overflow: %d", v))
+	}
+	return int(v), n
 }
