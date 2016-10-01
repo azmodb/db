@@ -2,6 +2,8 @@ package db
 
 import (
 	"bytes"
+	"math"
+	"reflect"
 	"testing"
 )
 
@@ -140,6 +142,34 @@ func TestPairFindGreateThan(t *testing.T) {
 		}
 		if found {
 			t.Fatalf("find: epxected to not find rev %d", rev)
+		}
+	}
+}
+
+func TestBlockMarshalUnmarshal(t *testing.T) {
+	for i, src := range []block{
+		block{data: []byte("hello world"), rev: math.MaxInt64},
+		block{data: []byte("hello world"), rev: 42},
+	} {
+		srcSize := src.size()
+		data := make([]byte, srcSize)
+		sn := src.marshal(data)
+		if sn != srcSize {
+			t.Fatalf("block: expected marshal size %d, have %d", srcSize, sn)
+		}
+
+		dst := block{}
+		dn, err := dst.unmarshal(unicode, data)
+		if err != nil {
+			t.Fatalf("block: unmarshal block #%d failed: %v", i, err)
+		}
+
+		if sn != dn {
+			t.Fatalf("block: source and destination length differ")
+		}
+		if !reflect.DeepEqual(src, dst) {
+			t.Fatalf("block: source and destination differ:\n%v\n%v",
+				src, dst)
 		}
 	}
 }

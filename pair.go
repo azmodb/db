@@ -1,7 +1,10 @@
 package db
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -19,9 +22,11 @@ var (
 // maxPoolDataSize defines the maximal unicode type pool size.
 const maxPoolDataSize = 2 * 8192 // TODO: find capacity
 
+const maxInt = uint64(^uint(0) >> 1)
+
 const (
-	numeric = 0x01
-	unicode = 0x02
+	numeric byte = 0x01
+	unicode byte = 0x02
 )
 
 // pair represents an internal immutable key/value pair. This structure
@@ -45,6 +50,85 @@ func (b block) num() int64    { return b.data.(int64) }
 func (b block) isNum() bool {
 	_, ok := b.data.(int64)
 	return ok
+}
+
+func (b block) size() (n int) {
+	if b.data == nil {
+		panic("block: cannot serialize <nil> block data type")
+	}
+
+	switch t := b.data.(type) {
+	case []byte:
+		n += uvarintSize(uint64(len(t))) + len(t)
+	case int64:
+		n += uvarintSize(uint64(t))
+	default:
+		panic(fmt.Sprintf("block: unsupported data type (%T)", t))
+	}
+	n += uvarintSize(uint64(b.rev))
+	return n
+}
+
+func (b block) marshal(data []byte) (n int) {
+	if b.data == nil {
+		panic("block: cannot serialize <nil> block data type")
+	}
+
+	switch t := b.data.(type) {
+	case []byte:
+		n += binary.PutUvarint(data[n:], uint64(len(t)))
+		n += copy(data[n:], t)
+	case int64:
+		n += binary.PutUvarint(data[n:], uint64(t))
+	default:
+		panic(fmt.Sprintf("block: unsupported data type (%T)", t))
+	}
+	n += binary.PutUvarint(data[n:], uint64(b.rev))
+	return n
+}
+
+func (b *block) unmarshal(typ byte, data []byte) (n int, err error) {
+	var v uint64
+	var m int
+
+	switch typ {
+	case unicode:
+		v, m, err = uvarint(data[n:])
+		n += m
+		if err != nil {
+			return n, err
+		}
+		if v > maxInt {
+			return n, errors.New("block: integer overflow")
+		}
+		value := make([]byte, int(v))
+		n += copy(value, data[n:n+int(v)])
+		b.data = value
+	case numeric:
+		v, m, err = uvarint(data[n:])
+		n += m
+		if err != nil {
+			return n, err
+		}
+		if v > math.MaxInt64 {
+			return n, errors.New("block: integer overflow")
+		}
+		b.data = int64(v)
+	default:
+		panic(fmt.Sprintf("block: unsupported data type (#%d)", typ))
+	}
+
+	v, m, err = uvarint(data[n:])
+	n += m
+	if err != nil {
+		return n, err
+	}
+	if v > math.MaxInt64 {
+		return n, errors.New("block: integer overflow")
+	}
+	b.rev = int64(v)
+
+	return n, err
 }
 
 // newPair returns an internal immutable key/value pair. A pair value
@@ -262,4 +346,26 @@ func clone(dst, src []byte) []byte {
 	dst = dst[:n]
 	copy(dst, src)
 	return dst
+}
+
+func uvarintSize(v uint64) (n int) {
+	for {
+		n++
+		v >>= 7
+		if v == 0 {
+			break
+		}
+	}
+	return n
+}
+
+func uvarint(data []byte) (uint64, int, error) {
+	v, n := binary.Uvarint(data)
+	if n < 0 {
+		return 0, n, errors.New("value larger than 64 bits")
+	}
+	if n == 0 {
+		return 0, n, errors.New("buffer too small")
+	}
+	return v, n, nil
 }
