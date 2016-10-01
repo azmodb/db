@@ -3,7 +3,6 @@ package db
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 	"sort"
 	"sync"
 
@@ -247,6 +246,45 @@ func (p *pair) increment(value interface{}, rev int64) *pair {
 
 func (p *pair) isNum() bool { return p.typ == numeric }
 
+func (p *pair) size() (n int) {
+	n = 1 + uvarintSize(uint64(len(p.blocks)))
+	for _, b := range p.blocks {
+		n += b.size()
+	}
+	return n
+}
+
+func (p *pair) marshal() (key []byte, data []byte) {
+	key = []byte(p.key)
+
+	data = make([]byte, p.size())
+	data[0] = p.typ
+	//n := 1
+	//n += binary.PutUvarint(data[n:], uint64(len(key)))
+	//n += copy(data[n:], key)
+
+	n := binary.PutUvarint(data[1:], uint64(len(p.blocks)))
+	n++
+	for _, b := range p.blocks {
+		n += b.marshal(data[n:])
+	}
+	return []byte(key), data
+}
+
+func (p *pair) unmarshal(key []byte, data []byte) {
+	p.key = string(key)
+
+	p.typ = data[0]
+	size, m := varint(data[1:])
+	n := 1 + m
+	p.blocks = make([]block, size)
+	for i := 0; i < size; i++ {
+		b := block{}
+		n += b.unmarshal(p.typ, data[n:])
+		p.blocks[i] = b
+	}
+}
+
 func newProtobufRecord(typ byte, blocks []block) *pb.Record {
 	n := len(blocks)
 	rec := pbrecPool.Get().(*pb.Record)
@@ -322,8 +360,6 @@ func clone(dst, src []byte) []byte {
 	return dst
 }
 
-const maxInt = uint64(^uint(0) >> 1)
-
 func uvarintSize(v uint64) (n int) {
 	for {
 		n++
@@ -348,16 +384,10 @@ func uvarint64(data []byte) (uint64, int) {
 
 func varint64(data []byte) (int64, int) {
 	v, n := uvarint64(data)
-	if v > math.MaxInt64 {
-		panic(fmt.Sprintf("varint: int64 overflow: %d", v))
-	}
 	return int64(v), n
 }
 
 func varint(data []byte) (int, int) {
 	v, n := uvarint64(data)
-	if v > maxInt {
-		panic(fmt.Sprintf("varint: int overflow: %d", v))
-	}
 	return int(v), n
 }

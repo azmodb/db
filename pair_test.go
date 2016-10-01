@@ -169,3 +169,32 @@ func TestBlockMarshalUnmarshal(t *testing.T) {
 		}
 	}
 }
+
+func TestPairMarshalUnmarshal(t *testing.T) {
+	for _, src := range []*pair{
+		&pair{
+			typ: unicode,
+			key: "key",
+			blocks: []block{
+				block{data: []byte("v1"), rev: math.MaxInt64},
+				block{data: []byte("v2"), rev: math.MaxInt64}},
+		},
+		&pair{
+			typ: unicode,
+			key: "key",
+			blocks: []block{
+				block{data: []byte("v1"), rev: math.MinInt64},
+				block{data: []byte("v2"), rev: math.MinInt64}},
+		},
+	} {
+		key, data := src.marshal()
+
+		dst := &pair{}
+		dst.unmarshal(key, data)
+
+		if !reflect.DeepEqual(src, dst) {
+			t.Fatalf("pair: source and destination differ:\n%v\n%v",
+				src, dst)
+		}
+	}
+}
