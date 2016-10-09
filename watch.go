@@ -2,158 +2,172 @@ package db
 
 import "sync"
 
-type notifier struct {
-	mu sync.Mutex // protects watchers
-	m  map[int]*Watcher
-	id int
+func queue(in <-chan Event, out chan<- Event) {
+	pending := make([]Event, 0, 32) // avoid small allocations
+	defer func() {
+		for _, v := range pending {
+			out <- v
+		}
+		pending = nil
+		close(out)
+	}()
 
-	notifyc chan struct{}
-	donec   chan struct{}
-	sigc    chan signal
-
-	state    sync.Mutex
-	shutdown bool
-}
-
-type signal struct {
-	current int64
-	p       *pair
-}
-
-func newNotifier() *notifier {
-	n := &notifier{
-		m:       make(map[int]*Watcher),
-		notifyc: make(chan struct{}),
-		donec:   make(chan struct{}),
-		sigc:    make(chan signal),
-	}
-	go n.run()
-	return n
-}
-
-func (n *notifier) run() {
 	for {
-		select {
-		case sig := <-n.sigc:
-			n.mu.Lock()
-			for _, w := range n.m {
-				w.send(newEvent(sig.current, sig.p.last()))
+		if len(pending) == 0 {
+			v, ok := <-in
+			if !ok {
+				return
 			}
-			n.mu.Unlock()
-		case <-n.donec:
-			n.notifyc <- struct{}{}
-			return
+			pending = append(pending, v)
+		}
+
+		select {
+		case v, ok := <-in:
+			if !ok {
+				return
+			}
+			pending = append(pending, v)
+
+		case out <- pending[0]:
+			pending = pending[1:]
 		}
 	}
 }
 
-func (n *notifier) Close() {
-	n.state.Lock()
-	if n.shutdown {
-		n.state.Unlock()
-		return
-	}
-	n.shutdown = true
-	n.donec <- struct{}{}
-	<-n.notifyc
-	n.state.Unlock()
+type Event struct {
+	Data    interface{}
+	Created int64
+	Current int64
+	Key     []byte
+	err     error
 }
 
-func (n *notifier) Notify(sig signal) {
-	n.state.Lock()
-	if n.shutdown {
-		n.state.Unlock()
-		return
-	}
+func (e Event) Err() error { return e.err }
 
-	n.sigc <- sig
-	n.state.Unlock()
+type Watcher struct {
+	cancel func(*Watcher)
+	out    chan Event
+	in     chan Event
+	id     int64
 }
 
-func (n *notifier) Add() *Watcher {
-	n.state.Lock()
-	if n.shutdown {
-		panic("appending to already closed notifier")
+func newWatcher(id int64, cancel func(*Watcher)) *Watcher {
+	if cancel == nil {
+		cancel = func(w *Watcher) {
+			close(w.in)
+			w.id = -1
+		}
 	}
-
-	n.mu.Lock()
-	n.id++
 	w := &Watcher{
-		ch: make(chan *Event),
-		n:  n,
-		id: n.id,
+		out:    make(chan Event, 64),
+		in:     make(chan Event, 64),
+		id:     id,
+		cancel: cancel,
 	}
-	n.m[n.id] = w
-	n.mu.Unlock()
-
-	n.state.Unlock()
+	go w.run()
 	return w
 }
 
-func (n *notifier) Delete(id int) {
-	n.state.Lock()
-	if n.shutdown {
-		n.state.Unlock()
-		return
-	}
-	delete(n.m, id)
-	n.state.Unlock()
-}
-
-type Watcher struct {
-	ch       chan *Event
-	id       int
-	n        *notifier
-	state    sync.Mutex
-	shutdown bool
-}
-
-func (w *Watcher) Recv() <-chan *Event { return w.ch }
-
-func (db *DB) Watch(key string) (*Watcher, int64, error) {
-	match := newMatcher(key)
-	defer match.release()
-	tree := db.load()
-
-	if elem := tree.root.Get(match); elem != nil {
-		db.mu.Lock()
-		n, found := db.reg[string(key)]
-		if !found {
-			n = newNotifier()
-			db.reg[string(key)] = n
-		}
-		watcher := n.Add()
-		db.mu.Unlock()
-		return watcher, tree.rev, nil
-	}
-	return nil, tree.rev, errKeyNotFound
-}
-
-func (db *DB) notify(p *pair, current int64) {
-	if n, found := db.reg[p.key]; found {
-		n.Notify(signal{current: current, p: p})
-	}
-}
-
-func (w *Watcher) send(ev *Event) {
-	w.state.Lock()
-	if w.shutdown {
-		w.state.Unlock()
-		return
-	}
-	w.ch <- ev
-	w.state.Unlock()
-}
-
 func (w *Watcher) Close() {
-	w.state.Lock()
-	if w.shutdown {
-		w.state.Unlock()
+	if w.id <= 0 {
 		return
 	}
-	w.shutdown = true
-	w.n.Delete(w.id)
-	w.state.Unlock()
+	w.cancel(w)
 }
 
-func (w *Watcher) ID() int { return w.id }
+func (w *Watcher) send(ev Event) {
+	if w.id <= 0 {
+		return
+	}
+	w.in <- ev
+}
+
+func (w *Watcher) Recv() <-chan Event { return w.out }
+
+func (w *Watcher) run() { queue(w.in, w.out) }
+
+type stream struct {
+	mu       sync.Mutex // protects watcher registry
+	watchers map[int64]*Watcher
+	num      int64
+	running  bool
+}
+
+func (s *stream) init() {
+	if s.running {
+		return
+	}
+	s.watchers = make(map[int64]*Watcher)
+	s.num = 0
+	s.running = true
+}
+
+func (s *stream) Register() *Watcher {
+	s.mu.Lock()
+	s.init()
+	s.num++
+	/*
+		w := &Watcher{
+			out:    make(chan Event, 64),
+			in:     make(chan Event, 64),
+			id:     s.num,
+			cancel: s.cancel,
+		}
+		go w.run()
+	*/
+	w := newWatcher(s.num, s.cancel)
+	s.watchers[s.num] = w
+	s.mu.Unlock()
+	return w
+}
+
+func (s *stream) cancel(w *Watcher) {
+	s.mu.Lock()
+	if _, found := s.watchers[w.id]; found {
+		delete(s.watchers, w.id)
+		w.send(Event{err: watcherCanceled})
+		close(w.in)
+		w.id = -1
+	}
+	s.mu.Unlock()
+}
+
+func (s *stream) Notify(p *pair, current int64) {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+
+	b := p.last()
+	for _, w := range s.watchers {
+		if w.id <= 0 {
+			continue
+		}
+		w.send(Event{
+			Current: current,
+			Created: b.rev,
+			Data:    b.data,
+		})
+	}
+	s.mu.Unlock()
+}
+
+func (s *stream) Close() {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+
+	for _, w := range s.watchers {
+		delete(s.watchers, w.id)
+		w.send(Event{err: pairDeleted})
+		close(w.in)
+		w.id = -1
+	}
+	s.watchers = nil
+	s.num = 0
+	s.running = false
+	s.mu.Unlock()
+}

@@ -1,85 +1,83 @@
 package db
 
-import (
-	"fmt"
-	"reflect"
-	"testing"
-)
-
-func TestWatcherAddDelete(t *testing.T) {
-	n := newNotifier()
-	w1 := n.Add()
-	w2 := n.Add()
-	w3 := n.Add()
-	if len(n.m) != 3 {
-		t.Fatalf("add watcher: expected 3 watchers, have %d", len(n.m))
-	}
-	n.Delete(w1.ID())
-	if len(n.m) != 2 {
-		t.Fatalf("del watcher: expected 2 watchers, have %d", len(n.m))
-	}
-	n.Delete(w2.ID())
-	if len(n.m) != 1 {
-		t.Fatalf("del watcher: expected 1 watcher, have %d", len(n.m))
-	}
-	n.Delete(w3.ID())
-	if len(n.m) != 0 {
-		t.Fatalf("del watcher: expected 0 watchers, have %d", len(n.m))
-	}
-}
-
-func TestNotifierClose(t *testing.T) {
-	n := newNotifier()
-	n.Close()
-	n.Close()
-	n.Close()
-
-	n.Notify(signal{})
-	n.Notify(signal{})
-	n.Notify(signal{})
-}
+import "testing"
 
 func TestBasicWatcher(t *testing.T) {
-	count := 10
+	count := 100
+	key := []byte("k")
 	db := New()
-	b := db.Next()
-	b.Insert("k", []byte("v0"), false)
-	b.Commit()
+	tx := db.Txn()
+	tx.Put(key, 0, false)
+	tx.Commit()
 
-	w, _, err := db.Watch("k")
+	w, _, err := db.Watch(key)
 	if err != nil {
 		t.Fatalf("create watcher: %v", err)
 	}
 	defer w.Close()
 
-	want := [][]byte{
-		[]byte("v1"), []byte("v2"), []byte("v3"), []byte("v4"), []byte("v5"),
-		[]byte("v6"), []byte("v7"), []byte("v8"), []byte("v9"), []byte("v10"),
-	}
-	result := make([][]byte, 0, count)
 	done := make(chan struct{})
-	go func(done chan<- struct{}) {
-		defer close(done)
-
-		i := 0
+	go func() {
+		n := 0
 		for ev := range w.Recv() {
-			result = append(result, ev.Blocks[0].Unicode)
-			i++
-			if i >= count {
+			if ev.Err() != nil {
+				if n != count || ev.Err() != watcherCanceled {
+					t.Fatalf("watcher: expected count %d and error %v, have %d %v",
+						count, watcherCanceled, n, ev.Err())
+				}
 				break
 			}
+			n++
+			if ev.Current != int64(n+1) {
+				t.Fatalf("watcher: expected current revision %d, have %d", int64(n+1),
+					ev.Current)
+			}
+			if ev.Created != int64(n+1) {
+				t.Fatalf("watcher: expected created revision %d, have %d", int64(n+1),
+					ev.Created)
+			}
+			if ev.Data.(int) != n {
+				t.Fatalf("watcher: expected value %d, have %d", n, ev.Data.(int))
+			}
 		}
-	}(done)
+		close(done)
+	}()
 
+	tx = db.Txn()
 	for i := 1; i <= count; i++ {
-		block := []byte(fmt.Sprintf("v%d", i))
-		b = db.Next()
-		b.Insert("k", block, false)
-		b.Commit()
+		tx.Put(key, i, false)
+	}
+	tx.Commit()
+
+	w.Close()
+	<-done
+}
+
+func TestWatcherCloseByUser(t *testing.T) {
+	s := &stream{}
+	w := s.Register()
+
+	w.Close()
+	if w.id != -1 {
+		t.Fatalf("watcher: expected zero id, have %d", w.id)
 	}
 
-	<-done
-	if !reflect.DeepEqual(want, result) {
-		t.Fatalf("watcher: invalid result\n%+v\n%+v", want, result)
+	w.Close()
+	if w.id != -1 {
+		t.Fatalf("watcher: expected zero id, have %d", w.id)
+	}
+}
+
+func TestWatcherClosed(t *testing.T) {
+	s := &stream{}
+	w := s.Register()
+
+	s.Close()
+	if s.running {
+		t.Fatalf("watcher: stream not closed")
+	}
+
+	if w.id != -1 {
+		t.Fatalf("watcher: expected zero id, have %d", w.id)
 	}
 }
