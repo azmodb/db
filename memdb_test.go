@@ -61,9 +61,15 @@ func TestBasicDB(t *testing.T) {
 }
 
 func testForEach(t *testing.T, db *DB, rev int64, count int) {
-	ch, _ := db.Range(nil, nil, 0, 0)
+	w, _, _ := db.Range(nil, nil, rev, 0)
+	defer w.Cancel()
+
 	i := 0
-	for ev := range ch {
+	for ev := range w.Recv() {
+		if ev.Err() != nil {
+			break
+		}
+
 		wantKey := []byte(fmt.Sprintf("k%.3d", i))
 		if bytes.Compare(ev.Key, wantKey) != 0 {
 			t.Fatalf("foreach: expected key %q, have %q", wantKey, ev.Key)
@@ -94,4 +100,18 @@ func TestForEach(t *testing.T) {
 	testForEach(t, db, -1, count)
 	testForEach(t, db, 0, count)
 	testForEach(t, db, int64(count), count)
+}
+
+func TestCancelRange(t *testing.T) {
+	count := 100
+	db := New()
+	tx := db.Txn()
+	for i := 0; i < count; i++ {
+		key := []byte(fmt.Sprintf("k%.3d", i))
+		tx.Put(key, i, false)
+	}
+	tx.Commit()
+
+	w, _, _ := db.Range(nil, nil, 0, 0)
+	w.Cancel()
 }

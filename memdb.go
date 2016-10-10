@@ -3,6 +3,7 @@
 package db
 
 import (
+	"bytes"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -28,9 +29,12 @@ const (
 	// underlying is deleted.
 	pairDeleted = perror("key/value pair deleted")
 
-	// watcherCanceled is the error returned when the watcher is
+	// notifierCanceled is the error returned when the watcher is
 	// canceled.
-	watcherCanceled = perror("watcher shut down")
+	notifierCanceled = perror("watcher shut down")
+
+	// errInvertedRange is returned when a inverted range is supplied.
+	errInvertedRange = perror("inverted range")
 )
 
 type perror string
@@ -72,52 +76,69 @@ func (db *DB) Get(key []byte, rev int64, equal bool) (interface{}, int64, int64,
 
 	if elem := tree.root.Get(match); elem != nil {
 		p := elem.(*pair)
-		var b block
-		if rev > 0 {
-			index, found := p.find(rev, equal)
-			if !found {
-				return nil, 0, tree.rev, errRevisionNotFound
-			}
-			b = p.at(index)
-		} else {
-			b = p.last()
+		b, found := lookup(p, rev, equal)
+		if found {
+			return b.data, b.rev, tree.rev, nil
 		}
-		return b.data, b.rev, tree.rev, nil
+		return nil, 0, tree.rev, errRevisionNotFound
 	}
 	return nil, 0, tree.rev, errKeyNotFound
 }
 
-func (db *DB) Range(from, to []byte, rev int64, limit int32) (<-chan Event, int64) {
-	w := newWatcher(42, nil)
-	tree := db.load()
-
-	go func() {
-		defer w.Close()
-
-		rangeFunc := func(elem llrb.Element) bool {
-			p := elem.(*pair)
-			var b block
-			if rev > 0 {
-				index, found := p.find(rev, false)
-				if !found {
-					return false // ignore revision not found error
-				}
-				b = p.at(index)
-			} else {
-				b = p.last()
-			}
-
-			w.send(Event{
-				Current: tree.rev,
-				Created: b.rev,
-				Data:    b.data,
-				Key:     p.key,
-			})
-			return false
+func lookup(p *pair, rev int64, equal bool) (block, bool) {
+	var b block
+	if rev > 0 {
+		index, found := p.find(rev, equal)
+		if !found {
+			return b, false
 		}
+		b = p.at(index)
+	} else {
+		b = p.last()
+	}
+	return b, true
+}
 
-		if from == nil && to == nil {
-			tree.root.ForEach(rangeFunc)
+func rangeFunc(n *Notifier, rev int64, current int64, limit int32) llrb.Visitor {
+	return func(elem llrb.Element) bool {
+		p := elem.(*pair)
+		b, found := lookup(p, rev, false)
+		if found {
+			return !n.send(p.key, b.data, b.rev, current)
+		}
+		return false // ignore revision not found error
+	}
+}
+
+func (db *DB) get(tree *tree, key []byte, rev int64) (*Notifier, int64, error) {
+	n := newNotifier(42, nil, 1)
+	go func() {
+		data, created, current, err := db.Get(key, rev, false)
+		if err != nil {
+			n.close(err)
+		} else {
+			n.send(key, data, created, current)
+		}
+	}()
+	return n, tree.rev, nil
+}
+
+func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, error) {
+	tree := db.load()
+	if bytes.Compare(from, to) > 0 {
+		return nil, tree.rev, errInvertedRange
+	}
+
+	if from != nil && to == nil { // simulate get request with equal == false
+		return db.get(tree, from, rev)
+	}
+
+	n := newNotifier(42, nil, defaultNotifierCapacity)
+	go func() {
+		defer n.Cancel() // in any case cancel the infinte event queue
+
+		if from == nil && to == nil { // foreach request
+			tree.root.ForEach(rangeFunc(n, rev, tree.rev, limit))
 			return
 		}
 
@@ -126,16 +147,10 @@ func (db *DB) Range(from, to []byte, rev int64, limit int32) (<-chan Event, int6
 			lo.release()
 			hi.release()
 		}()
-
-		tree.root.Range(lo, hi, rangeFunc)
+		tree.root.Range(lo, hi, rangeFunc(n, rev, tree.rev, limit))
 	}()
 
-	return w.Recv(), tree.rev
-}
-
-func (db *DB) Len() int {
-	tree := db.load()
-	return tree.root.Len()
+	return n, tree.rev, nil
 }
 
 func (db *DB) Rev() int64 {
@@ -143,7 +158,7 @@ func (db *DB) Rev() int64 {
 	return tree.rev
 }
 
-func (db *DB) Watch(key []byte) (*Watcher, int64, error) {
+func (db *DB) Watch(key []byte) (*Notifier, int64, error) {
 	match := newMatcher(key)
 	defer match.release()
 	tree := db.load()
@@ -193,27 +208,14 @@ func (tx *Txn) Update(key []byte, up Updater, tombstone bool) (int64, error) {
 	return tx.rev, nil
 }
 
-func (tx *Txn) Put(key []byte, data interface{}, tombstone bool) (int64, error) {
-	match := newMatcher(key)
-	defer match.release()
-
-	rev := tx.rev + 1
-	var p *pair
-	if elem := tx.txn.Get(match); elem != nil {
-		p = elem.(*pair)
-		last := p.last().data
-		if !typeEqual(last, data) {
-			return tx.rev, errIncompatibleValue
-		}
-		p = p.insert(data, rev, tombstone)
-	} else {
-		p = newPair(key, data, rev)
+func noop(data interface{}) Updater {
+	return func(_ interface{}) interface{} {
+		return data
 	}
-	tx.txn.Insert(p)
-	tx.rev = rev
-	p.stream.Notify(p, rev)
+}
 
-	return tx.rev, nil
+func (tx *Txn) Put(key []byte, data interface{}, tombstone bool) (int64, error) {
+	return tx.Update(key, noop(data), tombstone)
 }
 
 func (tx *Txn) Delete(key []byte) int64 {
@@ -225,12 +227,10 @@ func (tx *Txn) Delete(key []byte) int64 {
 		tx.txn.Delete(p)
 		tx.rev++
 		p.stream.Notify(p, tx.rev)
-		p.stream.Close()
+		p.stream.Cancel()
 	}
 	return tx.rev
 }
-
-func (tx *Txn) Len() int { return tx.txn.Len() }
 
 func (tx *Txn) Commit() {
 	if tx.txn == nil { // already aborted or committed
