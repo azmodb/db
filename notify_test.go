@@ -57,6 +57,16 @@ func TestNotifierCancelByUser(t *testing.T) {
 	n := s.Register()
 
 	n.Cancel()
+	if s.num != 0 {
+		t.Fatalf("stream: expected notifier count zero, have %d", s.num)
+	}
+	if s.running {
+		t.Fatalf("stream: stream not closed")
+	}
+	if s.notifiers != nil {
+		t.Fatalf("stream: expected <nil> map: have %v", s.notifiers)
+	}
+
 	if n.id != -1 {
 		t.Fatalf("notifier: expected zero id, have %d", n.id)
 	}

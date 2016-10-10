@@ -136,6 +136,12 @@ func (s *stream) init() {
 	s.running = true
 }
 
+func (s *stream) shutdown() {
+	s.notifiers = nil
+	s.num = 0
+	s.running = false
+}
+
 func (s *stream) Register() *Notifier {
 	s.mu.Lock()
 	s.init()
@@ -151,19 +157,8 @@ func (s *stream) cancel(n *Notifier) {
 	if _, found := s.notifiers[n.id]; found {
 		delete(s.notifiers, n.id)
 	}
-	s.mu.Unlock()
-}
-
-func (s *stream) Notify(p *pair, current int64) {
-	s.mu.Lock()
-	if !s.running {
-		s.mu.Unlock()
-		return
-	}
-
-	b := p.last()
-	for _, n := range s.notifiers {
-		n.send(p.key, b.data, b.rev, current)
+	if len(s.notifiers) == 0 {
+		s.shutdown()
 	}
 	s.mu.Unlock()
 }
@@ -179,8 +174,20 @@ func (s *stream) Cancel() {
 		delete(s.notifiers, n.id)
 		n.close(pairDeleted)
 	}
-	s.notifiers = nil
-	s.num = 0
-	s.running = false
+	s.shutdown()
+	s.mu.Unlock()
+}
+
+func (s *stream) Notify(p *pair, current int64) {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+
+	b := p.last()
+	for _, n := range s.notifiers {
+		n.send(p.key, b.data, b.rev, current)
+	}
 	s.mu.Unlock()
 }
