@@ -34,6 +34,8 @@ func queue(in <-chan Event, out chan<- Event, capacity int) {
 	}
 }
 
+// Event represents a database key or range search query result. This
+// structure must be kept immutable.
 type Event struct {
 	Data    interface{}
 	Created int64
@@ -42,10 +44,12 @@ type Event struct {
 	err     error
 }
 
+// Err returns an error if any.
 func (e Event) Err() error { return e.err }
 
 const defaultNotifierCapacity = 64
 
+// Notifier represents the database event notifier.
 type Notifier struct {
 	cancel func(*Notifier)
 	out    chan Event
@@ -79,6 +83,7 @@ func (n *Notifier) shutdown() {
 	n.id = -1
 }
 
+// Cancel cancel and close the notifier. It should not be reused.
 func (n *Notifier) Cancel() {
 	n.mu.Lock()
 	if n.id <= 0 {
@@ -118,7 +123,8 @@ func (n *Notifier) close(err error) {
 	n.mu.Unlock()
 }
 
-func (w *Notifier) Recv() <-chan Event { return w.out }
+// Recv returns the receiving channel part.
+func (n *Notifier) Recv() <-chan Event { return n.out }
 
 type stream struct {
 	mu        sync.Mutex // protects watcher registry

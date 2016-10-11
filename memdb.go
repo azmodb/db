@@ -41,6 +41,9 @@ type perror string
 
 func (e perror) Error() string { return string(e) }
 
+// DB represents an immutable, consistent, in-memory key/value database.
+// All access is performed through a transaction which can be obtained
+// through the database.
 type DB struct {
 	writer sync.Mutex // exclusive writer transaction
 	tree   unsafe.Pointer
@@ -69,6 +72,9 @@ func (db *DB) load() *tree {
 	return (*tree)(atomic.LoadPointer(&db.tree))
 }
 
+// Get retrieves the value for a key at revision rev. If rev <= 0 it
+// returns the current value for a key. If equal is true the value
+// revision must match the supplied rev.
 func (db *DB) Get(key []byte, rev int64, equal bool) (interface{}, int64, int64, error) {
 	match := newMatcher(key)
 	defer match.release()
@@ -123,6 +129,20 @@ func (db *DB) get(tree *tree, key []byte, rev int64) (*Notifier, int64, error) {
 	return n, tree.rev, nil
 }
 
+// Range iterates over values stored in the database in the range at rev
+// over the interval [from, to] from left to right. Limit limits the
+// number of keys returned. If rev <= 0 Range gets the keys at the
+// current revision of the database. From/To combination:
+//
+//	from == nil && to == nil:
+//		the request returns all keys in the database
+//	from != nil && to != nil:
+//		the request returns the keys in the interval
+//	from != nil && to == nil:
+//		the request returns the key (like Get)
+//
+// Range a notifier, the current revision of the database and an error
+// if any.
 func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, error) {
 	tree := db.load()
 	if bytes.Compare(from, to) > 0 {
@@ -153,11 +173,14 @@ func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, 
 	return n, tree.rev, nil
 }
 
+// Rev returns the current revision of the database.
 func (db *DB) Rev() int64 {
 	tree := db.load()
 	return tree.rev
 }
 
+// Watch returns a notifier for a key. If the key does not exist it
+// returns an error.
 func (db *DB) Watch(key []byte) (*Notifier, int64, error) {
 	match := newMatcher(key)
 	defer match.release()
@@ -170,20 +193,32 @@ func (db *DB) Watch(key []byte) (*Notifier, int64, error) {
 	return nil, tree.rev, errKeyNotFound
 }
 
+// Txn starts a new batch transaction. Only one batch transaction can
+// be used at a time. Starting multiple batch transactions will cause
+// the calls to block and be serialized until the current transaction
+// finishes.
 func (db *DB) Txn() *Txn {
 	db.writer.Lock()
 	tree := db.load()
 	return &Txn{txn: tree.root.Txn(), rev: tree.rev, db: db}
 }
 
+// Txn represents a batch transaction on the database.
 type Txn struct {
 	txn *llrb.Txn
 	rev int64
 	db  *DB
 }
 
+// Updater is a function that operates on a key/value pair
 type Updater func(data interface{}) interface{}
 
+// Update updated the value for a key. If the key exists and tombstone is
+// true then its previous versions will be overwritten. Supplied key
+// and value must remain valid for the life of the database.
+//
+// It the key exists and the value data type differ, Update returns an
+// error.
 func (tx *Txn) Update(key []byte, up Updater, tombstone bool) (int64, error) {
 	match := newMatcher(key)
 	defer match.release()
@@ -214,10 +249,18 @@ func noop(data interface{}) Updater {
 	}
 }
 
+// Put sets the value for a key. If the key exists and tombstone is true
+// then its previous versions will be overwritten. Supplied key and
+// value must remain valid for the life of the database.
+//
+// It the key exists and the value data type differ, Put returns an
+// error.
 func (tx *Txn) Put(key []byte, data interface{}, tombstone bool) (int64, error) {
 	return tx.Update(key, noop(data), tombstone)
 }
 
+// Delete removes a key/value pair and returns the current revision of the
+// database.
 func (tx *Txn) Delete(key []byte) int64 {
 	match := newMatcher(key)
 	defer match.release()
@@ -232,6 +275,8 @@ func (tx *Txn) Delete(key []byte) int64 {
 	return tx.rev
 }
 
+// Commit closes the transaction and writes all changes into the
+// database.
 func (tx *Txn) Commit() {
 	if tx.txn == nil { // already aborted or committed
 		return
@@ -245,6 +290,7 @@ func (tx *Txn) Commit() {
 	tx.db = nil
 }
 
+// Rollback closes the transaction and ignores all previous updates.
 func (tx *Txn) Rollback() {
 	if tx.txn == nil { // already aborted or committed
 		return
