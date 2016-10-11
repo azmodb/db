@@ -8,11 +8,9 @@ import (
 	"github.com/boltdb/bolt"
 )
 
-type Visitor func(key []byte, value []byte)
-
 type Backend interface {
-	Range(rev [8]byte, fn Visitor) error
-	Txn(rev [8]byte) (Txn, error)
+	Range(rev Revision, fn func(key []byte, value []byte)) error
+	Txn(rev Revision) (Txn, error)
 }
 
 type Txn interface {
@@ -20,6 +18,8 @@ type Txn interface {
 	Commit() error
 	Rollback() error
 }
+
+type Revision [8]byte
 
 var (
 	rootBuckets = [][]byte{dataBucket, metaBucket}
@@ -33,7 +33,7 @@ type DB struct {
 	root *bolt.DB
 }
 
-func Open(path string, timeout time.Duration) (*DB, error) {
+func Open(path, name string, timeout time.Duration) (*DB, error) {
 	root, err := bolt.Open(path, 0600, &bolt.Options{
 		Timeout: timeout,
 	})
@@ -66,7 +66,7 @@ func (db *DB) Close() error {
 	return err
 }
 
-func (db *DB) Range(rev [8]byte, fn Visitor) error {
+func (db *DB) Range(rev Revision, fn func(k, v []byte)) error {
 	return db.root.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket(metaBucket).Bucket(rev[:])
 		if meta == nil {
@@ -86,7 +86,7 @@ func (db *DB) Range(rev [8]byte, fn Visitor) error {
 	})
 }
 
-func (db *DB) Txn(rev [8]byte) (Txn, error) {
+func (db *DB) Txn(rev Revision) (Txn, error) {
 	tx, err := db.root.Begin(true)
 	if err != nil {
 		return nil, err
