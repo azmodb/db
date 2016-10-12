@@ -103,3 +103,5 @@ func (p pair) insert(data interface{}, rev int64, ts bool) *pair {
 func (p pair) last() block { return p.blocks[len(p.blocks)-1] }
 
 func (p pair) at(index int) block { return p.blocks[index] }
+
+func compare(a, b []byte) int { return bytes.Compare(a, b) }
