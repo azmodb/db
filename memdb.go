@@ -3,7 +3,6 @@
 package db
 
 import (
-	"bytes"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -145,7 +144,7 @@ func (db *DB) get(tree *tree, key []byte, rev int64) (*Notifier, int64, error) {
 // if any.
 func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, error) {
 	tree := db.load()
-	if bytes.Compare(from, to) > 0 {
+	if compare(from, to) > 0 {
 		return nil, tree.rev, errInvertedRange
 	}
 
