@@ -213,12 +213,11 @@ type Txn struct {
 // Updater is a function that operates on a key/value pair
 type Updater func(data interface{}) interface{}
 
-// Update updated the value for a key. If the key exists and tombstone is
+// Update updates the value for a key. If the key exists and tombstone is
 // true then its previous versions will be overwritten. Supplied key
 // and value must remain valid for the life of the database.
 //
-// It the key exists and the value data type differ, Update returns an
-// error.
+// It the key exists and the value data type differ it returns an error.
 func (tx *Txn) Update(key []byte, up Updater, tombstone bool) (int64, error) {
 	match := newMatcher(key)
 	defer match.release()
@@ -253,8 +252,7 @@ func noop(data interface{}) Updater {
 // then its previous versions will be overwritten. Supplied key and
 // value must remain valid for the life of the database.
 //
-// It the key exists and the value data type differ, Put returns an
-// error.
+// It the key exists and the value data type differ, it returns an error.
 func (tx *Txn) Put(key []byte, data interface{}, tombstone bool) (int64, error) {
 	return tx.Update(key, noop(data), tombstone)
 }
