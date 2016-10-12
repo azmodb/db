@@ -1,4 +1,5 @@
-# DB [![GoDoc](https://godoc.org/github.com/azmodb/db?status.svg)](https://godoc.org/github.com/azmodb/db)
+# DB [![GoDoc](https://godoc.org/github.com/azmodb/db?status.svg)](https://godoc.org/github.com/azmodb/db) [![Build Status](https://secure.travis-ci.org/azmodb/db.png)](http://travis-ci.org/azmodb/db)
+
 
 Package db implements an immutable, consistent, in-memory key/value store.
 DB uses an immutable Left-Leaning Red-Black tree (LLRB) internally and
