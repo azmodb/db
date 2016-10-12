@@ -7,37 +7,39 @@ supports snapshotting.
 
 Example:
 
-	package main
+```go
+package main
 
-	import (
-		"fmt"
-		"log"
+import (
+	"fmt"
+	"log"
 
-		"github.com/azmodb/db"
-	)
+	"github.com/azmodb/db"
+)
 
-	func main() {
-		db := db.New()
-		tx := db.Txn()
-		for i := 0; i < 100; i++ {
-			key := []byte(fmt.Sprintf("key%.3d", i))
-			_, err := tx.Put(key, i, false)
-			if err != nil {
-				log.Fatalf("creating %q: %v", key, err)
-			}
-		}
-		tx.Commit()
-
-		n, _, err := db.Range(nil, nil, 0, 0)
+func main() {
+	db := db.New()
+	tx := db.Txn()
+	for i := 0; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%.3d", i))
+		_, err := tx.Put(key, i, false)
 		if err != nil {
-			log.Fatalf("range: %v", err)
-		}
-		defer n.Cancel()
-
-		for ev := range n.Recv() {
-			if ev.Err() != nil {
-				break
-			}
-			fmt.Println(string(ev.Key), ev.Data, ev.Created, ev.Current)
+			log.Fatalf("creating %q: %v", key, err)
 		}
 	}
+	tx.Commit()
+
+	n, _, err := db.Range(nil, nil, 0, 0)
+	if err != nil {
+		log.Fatalf("range: %v", err)
+	}
+	defer n.Cancel()
+
+	for ev := range n.Recv() {
+		if ev.Err() != nil {
+			break
+		}
+		fmt.Println(string(ev.Key), ev.Data, ev.Created, ev.Current)
+	}
+}
+```
