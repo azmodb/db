@@ -193,7 +193,7 @@ func (s *stream) Notify(p *pair, current int64) {
 
 	b := p.last()
 	for _, n := range s.notifiers {
-		n.send(p.key, b.data, b.rev, current)
+		n.send(p.key, b.Data, b.Rev, current)
 	}
 	s.mu.Unlock()
 }

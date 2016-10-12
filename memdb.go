@@ -83,7 +83,7 @@ func (db *DB) Get(key []byte, rev int64, equal bool) (interface{}, int64, int64,
 		p := elem.(*pair)
 		b, found := lookup(p, rev, equal)
 		if found {
-			return b.data, b.rev, tree.rev, nil
+			return b.Data, b.Rev, tree.rev, nil
 		}
 		return nil, 0, tree.rev, errRevisionNotFound
 	}
@@ -109,7 +109,7 @@ func rangeFunc(n *Notifier, rev int64, current int64, limit int32) llrb.Visitor 
 		p := elem.(*pair)
 		b, found := lookup(p, rev, false)
 		if found {
-			return !n.send(p.key, b.data, b.rev, current)
+			return !n.send(p.key, b.Data, b.Rev, current)
 		}
 		return false // ignore revision not found error
 	}
@@ -225,7 +225,7 @@ func (tx *Txn) Update(key []byte, up Updater, tombstone bool) (int64, error) {
 	var p *pair
 	if elem := tx.txn.Get(match); elem != nil {
 		p = elem.(*pair)
-		last := p.last().data
+		last := p.last().Data
 		data := up(last)
 		if !typeEqual(last, data) {
 			return tx.rev, errIncompatibleValue

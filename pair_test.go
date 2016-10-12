@@ -7,7 +7,7 @@ import (
 
 func TestPairAppendAndTombstone(t *testing.T) {
 	test := func(p *pair, key []byte, data int64, rev int64, length int) {
-		last := p.blocks[len(p.blocks)-1].data.(int64)
+		last := p.blocks[len(p.blocks)-1].Data.(int64)
 		if last != data {
 			t.Fatalf("pair: expected current value %d, have %d", data, last)
 		}
