@@ -3,9 +3,11 @@ package backend
 import (
 	"crypto/sha1"
 	"errors"
+	"io"
 	"time"
 
-	"github.com/boltdb/bolt"
+	bolt "github.com/boltdb/bolt"
+	"github.com/golang/snappy"
 )
 
 type Backend interface {
@@ -30,11 +32,47 @@ var (
 
 type Option func(*DB) error
 
-type DB struct {
-	root *bolt.DB
+func WithMaxBatchEntries(entries int) Option {
+	return func(db *DB) error {
+		db.maxEntries = entries
+		return nil
+	}
 }
 
+func WithMaxBatchSize(size int) Option {
+	return func(db *DB) error {
+		db.maxSize = size
+		return nil
+	}
+}
+
+func WithCompression() Option {
+	return func(db *DB) error {
+		db.compress = true
+		return nil
+	}
+}
+
+type DB struct {
+	root       *bolt.DB
+	maxEntries int
+	maxSize    int
+	compress   bool
+}
+
+const (
+	defaultMaxBatchSize    = 2 << 20
+	defaultMaxBatchEntries = 256
+)
+
 func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
+	db := newDefaultDB()
+	for _, opt := range opts {
+		if err := opt(db); err != nil {
+			return nil, err
+		}
+	}
+
 	root, err := bolt.Open(path, 0600, &bolt.Options{
 		Timeout: timeout,
 	})
@@ -57,6 +95,14 @@ func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 	return &DB{root: root}, nil
 }
 
+func newDefaultDB() *DB {
+	return &DB{
+		maxEntries: defaultMaxBatchEntries,
+		maxSize:    defaultMaxBatchSize,
+		compress:   false,
+	}
+}
+
 func (db *DB) Close() error {
 	if db == nil || db.root == nil {
 		return errors.New("backend is shut down")
@@ -65,6 +111,14 @@ func (db *DB) Close() error {
 	err := db.root.Close()
 	db.root = nil
 	return err
+}
+
+func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
+	err = db.root.View(func(tx *bolt.Tx) error {
+		n, err = tx.WriteTo(w)
+		return err
+	})
+	return n, err
 }
 
 func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
@@ -81,7 +135,19 @@ func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
 			if v == nil {
 				panic("cannot find value for key: " + string(k))
 			}
-			fn(k, v)
+			if db.compress {
+				uk, err := snappy.Decode(nil, k)
+				if err != nil {
+					return err
+				}
+				uv, err := snappy.Decode(nil, v)
+				if err != nil {
+					return err
+				}
+				fn(uk, uv)
+			} else {
+				fn(k, v)
+			}
 		}
 		return nil
 	})
@@ -100,8 +166,9 @@ func (db *DB) Batch(rev Revision) (Batch, error) {
 	}
 	return &batch{
 		entries:    make([]*entry, 12),
-		maxEntries: 12,
-		maxSize:    10 * 1024 * 1024,
+		maxEntries: db.maxEntries,
+		maxSize:    db.maxSize,
+		compress:   db.compress,
 
 		meta: meta,
 		data: data,
@@ -128,6 +195,7 @@ type batch struct {
 	size       int
 	maxEntries int
 	maxSize    int
+	compress   bool
 
 	meta *bolt.Bucket
 	data *bolt.Bucket
@@ -145,8 +213,13 @@ func (b *batch) next() *entry {
 
 func (b *batch) Put(key, value []byte) (err error) {
 	e := b.next()
-	e.key = key
-	e.value = value
+	if b.compress {
+		e.key = snappy.Encode(nil, e.key)
+		e.value = snappy.Encode(nil, e.value)
+	} else {
+		e.key = key
+		e.value = value
+	}
 	b.size += len(key) + len(value)
 	b.index++
 
