@@ -10,13 +10,12 @@ import (
 
 type Backend interface {
 	Range(rev Revision, fn func(key []byte, value []byte)) error
-	Txn(rev Revision) (Txn, error)
+	Batch(rev Revision) (Batch, error)
 }
 
-type Txn interface {
+type Batch interface {
 	Put(key []byte, value []byte) error
-	Commit() error
-	Rollback() error
+	Close() error
 }
 
 type Revision [8]byte
@@ -29,11 +28,13 @@ var (
 	_ Backend = (*DB)(nil)
 )
 
+type Option func(*DB) error
+
 type DB struct {
 	root *bolt.DB
 }
 
-func Open(path, name string, timeout time.Duration) (*DB, error) {
+func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 	root, err := bolt.Open(path, 0600, &bolt.Options{
 		Timeout: timeout,
 	})
@@ -66,7 +67,7 @@ func (db *DB) Close() error {
 	return err
 }
 
-func (db *DB) Range(rev Revision, fn func(k, v []byte)) error {
+func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
 	return db.root.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket(metaBucket).Bucket(rev[:])
 		if meta == nil {
@@ -86,7 +87,7 @@ func (db *DB) Range(rev Revision, fn func(k, v []byte)) error {
 	})
 }
 
-func (db *DB) Txn(rev Revision) (Txn, error) {
+func (db *DB) Batch(rev Revision) (Batch, error) {
 	tx, err := db.root.Begin(true)
 	if err != nil {
 		return nil, err
@@ -97,7 +98,15 @@ func (db *DB) Txn(rev Revision) (Txn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &txn{meta: meta, data: data, Tx: tx}, nil
+	return &batch{
+		entries:    make([]*entry, 12),
+		maxEntries: 12,
+		maxSize:    10 * 1024 * 1024,
+
+		meta: meta,
+		data: data,
+		tx:   tx,
+	}, nil
 }
 
 func sha1sum(data []byte) [sha1.Size]byte {
@@ -108,19 +117,72 @@ func sha1sum(data []byte) [sha1.Size]byte {
 	return b
 }
 
-type txn struct {
-	meta *bolt.Bucket
-	data *bolt.Bucket
-	*bolt.Tx
+type entry struct {
+	key   []byte
+	value []byte
 }
 
-func (tx *txn) Put(key, value []byte) (err error) {
+type batch struct {
+	entries    []*entry
+	index      int
+	size       int
+	maxEntries int
+	maxSize    int
+
+	meta *bolt.Bucket
+	data *bolt.Bucket
+	tx   *bolt.Tx
+}
+
+func (b *batch) next() *entry {
+	e := b.entries[b.index]
+	if e == nil {
+		e = &entry{}
+		b.entries[b.index] = e
+	}
+	return e
+}
+
+func (b *batch) Put(key, value []byte) (err error) {
+	e := b.next()
+	e.key = key
+	e.value = value
+	b.size += len(key) + len(value)
+	b.index++
+
+	return b.flush(false)
+}
+
+func (b *batch) put(key, value []byte) (err error) {
 	sum := sha1sum(value)
-	if v := tx.data.Get(sum[:]); v == nil {
-		err = tx.data.Put(sum[:], value)
+	if v := b.data.Get(sum[:]); v == nil {
+		err = b.data.Put(sum[:], value)
 		if err != nil {
 			return err
 		}
 	}
-	return tx.meta.Put(key, sum[:])
+	return b.meta.Put(key, sum[:])
+}
+
+func (b *batch) flush(force bool) (err error) {
+	if b.index >= b.maxEntries || b.size >= b.maxSize || force {
+		for i := 0; i < b.index; i++ {
+			e := b.entries[i]
+			if err = b.put(e.key, e.value); err != nil {
+				return err
+			}
+			e.key = nil
+			e.value = nil
+		}
+		b.index = 0
+		b.size = 0
+	}
+	return err
+}
+
+func (b *batch) Close() error {
+	if err := b.flush(true); err != nil {
+		return err
+	}
+	return b.tx.Commit()
 }
