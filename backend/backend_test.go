@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/boltdb/bolt"
+	btree "github.com/boltdb/bolt"
 )
 
 func testDefaultBackend(t *testing.T, db *DB) {
@@ -109,7 +109,7 @@ func TestDuplicateValues(t *testing.T) {
 	insertEntries(t, count, 2, db)
 
 	i := 0
-	err = db.root.View(func(tx *bolt.Tx) error {
+	err = db.root.View(func(tx *btree.Tx) error {
 		data := tx.Bucket(dataBucket)
 		c := data.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {

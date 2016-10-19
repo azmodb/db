@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	bolt "github.com/boltdb/bolt"
+	btree "github.com/boltdb/bolt"
 	"github.com/golang/snappy"
 )
 
@@ -54,7 +54,7 @@ func WithCompression() Option {
 }
 
 type DB struct {
-	root       *bolt.DB
+	root       *btree.DB
 	maxEntries int
 	maxSize    int
 	compress   bool
@@ -73,14 +73,14 @@ func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 		}
 	}
 
-	root, err := bolt.Open(path, 0600, &bolt.Options{
+	root, err := btree.Open(path, 0600, &btree.Options{
 		Timeout: timeout,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if err = root.Update(func(tx *bolt.Tx) (err error) {
+	if err = root.Update(func(tx *btree.Tx) (err error) {
 		for _, name := range rootBuckets {
 			_, err = tx.CreateBucketIfNotExists(name)
 			if err != nil {
@@ -114,7 +114,7 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
-	err = db.root.View(func(tx *bolt.Tx) error {
+	err = db.root.View(func(tx *btree.Tx) error {
 		n, err = tx.WriteTo(w)
 		return err
 	})
@@ -122,7 +122,7 @@ func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
-	return db.root.View(func(tx *bolt.Tx) error {
+	return db.root.View(func(tx *btree.Tx) error {
 		meta := tx.Bucket(metaBucket).Bucket(rev[:])
 		if meta == nil {
 			return errors.New("revision not found")
@@ -197,9 +197,9 @@ type batch struct {
 	maxSize    int
 	compress   bool
 
-	meta *bolt.Bucket
-	data *bolt.Bucket
-	tx   *bolt.Tx
+	meta *btree.Bucket
+	data *btree.Bucket
+	tx   *btree.Tx
 }
 
 func (b *batch) next() *entry {
