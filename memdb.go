@@ -65,7 +65,9 @@ func newDB(t *tree) *DB {
 // New returns an immutable, consistent, in-memory key/value database.
 func New() *DB { return newDB(nil) }
 
-func (db *DB) Reload(backend backend.Backend) error {
+// Reload reloads the immutable, consistent, in-memory key/value database
+// from the underlying backend.
+func Reload(backend backend.Backend) (*DB, error) {
 	rev, err := backend.Last()
 	if err != nil {
 		return nil, err
@@ -102,6 +104,8 @@ func (db *DB) Reload(backend backend.Backend) error {
 	return newDB(tree), nil
 }
 
+// Snapshot writes the entire in-memory database to the underlying
+// backend.
 func (db *DB) Snapshot(backend backend.Backend) error {
 	tree := db.load()
 
@@ -113,19 +117,17 @@ func (db *DB) Snapshot(backend backend.Backend) error {
 		return err
 	}
 
+	buf := newBuffer(nil)
 	tree.root.ForEach(func(elem llrb.Element) bool {
 		p := elem.(*pair)
 
-		buf := newBuffer(nil)
+		buf.Reset()
 		if err = encode(buf, p.blocks); err != nil {
 			return true
 		}
 
-		flushed, err := batch.Put(p.key, buf.Bytes())
-		if err != nil {
+		if err = batch.Put(p.key, buf.Bytes()); err != nil {
 			return true
-		}
-		if flushed {
 		}
 		return false
 	})
