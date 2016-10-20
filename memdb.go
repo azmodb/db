@@ -1,5 +1,18 @@
 // Package db implements an immutable, consistent, in-memory key/value store.
 // DB uses an immutable Left-Leaning Red-Black tree (LLRB) internally.
+// The database provides Atomicity, Consistency and Isolation from ACID.
+// Being that it is in-memory, it does not provide durability.
+//
+// The database provides the following:
+//
+//	* Multi-Version Concurrency Control (MVCC) - By leveraging immutable LLRB
+//	  trees the database is able to support any number of concurrent readers
+//	  without locking,  and allows a writer to make progress.
+//
+//	* Transaction Support - The database allows for rich transactions, in
+//	  which multiple objects are inserted, updated or deleted. The database
+//	  provides atomicity and isolation in ACID terminology, such that until
+//	  commit the updates are not visible.
 package db
 
 import (
