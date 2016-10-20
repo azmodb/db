@@ -18,7 +18,7 @@ The database provides the following:
   provides atomicity and isolation in ACID terminology, such that until
   commit the updates are not visible.
 
-For the underlying immutable radix trees, see [llrb](https://github.com/azmodb/llrb).
+For the underlying immutable LLRB trees, see [llrb](https://github.com/azmodb/llrb).
 
 
 Example
