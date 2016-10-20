@@ -3,11 +3,13 @@
 package db
 
 import (
+	"encoding/binary"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/azmodb/db/backend"
 	"github.com/azmodb/llrb"
 )
 
@@ -53,14 +55,85 @@ type tree struct {
 	rev  int64
 }
 
-// New returns an immutable, consistent, in-memory key/value database.
-func New() *DB { return newDB(nil) }
-
 func newDB(t *tree) *DB {
 	if t == nil {
 		t = &tree{root: &llrb.Tree{}}
 	}
 	return &DB{tree: unsafe.Pointer(t)}
+}
+
+// New returns an immutable, consistent, in-memory key/value database.
+func New() *DB { return newDB(nil) }
+
+func (db *DB) Reload(backend backend.Backend) error {
+	rev, err := backend.Last()
+	if err != nil {
+		return nil, err
+	}
+
+	tree := &tree{
+		rev:  int64(binary.BigEndian.Uint64(rev[:])),
+		root: &llrb.Tree{},
+	}
+	txn := tree.root.Txn()
+
+	err = backend.Range(rev, func(key, value []byte) (err error) {
+		buf := newBuffer(value)
+		blocks := []block{}
+		if err = decode(buf, &blocks); err != nil {
+			return err
+		}
+
+		p := &pair{
+			stream: &stream{},
+			blocks: blocks,
+		}
+		p.key = make([]byte, len(key))
+		copy(p.key, key)
+
+		txn.Insert(p)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tree.root = txn.Commit()
+	return newDB(tree), nil
+}
+
+func (db *DB) Snapshot(backend backend.Backend) error {
+	tree := db.load()
+
+	rev := [8]byte{}
+	binary.BigEndian.PutUint64(rev[:], uint64(tree.rev))
+
+	batch, err := backend.Batch(rev)
+	if err != nil {
+		return err
+	}
+
+	tree.root.ForEach(func(elem llrb.Element) bool {
+		p := elem.(*pair)
+
+		buf := newBuffer(nil)
+		if err = encode(buf, p.blocks); err != nil {
+			return true
+		}
+
+		flushed, err := batch.Put(p.key, buf.Bytes())
+		if err != nil {
+			return true
+		}
+		if flushed {
+		}
+		return false
+	})
+	if err != nil {
+		batch.Close()
+		return err
+	}
+	return batch.Close()
 }
 
 func (db *DB) store(t *tree) {
@@ -74,6 +147,9 @@ func (db *DB) load() *tree {
 // Get retrieves the value for a key at revision rev. If rev <= 0 it
 // returns the current value for a key. If equal is true the value
 // revision must match the supplied rev.
+//
+// Get returns the revision of the key/value pair, the current revision
+// of the database and an errors if any.
 func (db *DB) Get(key []byte, rev int64, equal bool) (interface{}, int64, int64, error) {
 	match := newMatcher(key)
 	defer match.release()
@@ -140,8 +216,8 @@ func (db *DB) get(tree *tree, key []byte, rev int64) (*Notifier, int64, error) {
 //	from != nil && to == nil:
 //		the request returns the key (like Get)
 //
-// Range a notifier, the current revision of the database and an error
-// if any.
+// Range returns a notifier, the current revision of the database and an
+// error if any.
 func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, error) {
 	tree := db.load()
 	if compare(from, to) > 0 {

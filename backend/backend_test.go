@@ -23,7 +23,7 @@ func testDefaultBackend(t *testing.T, db *DB) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("k%.3d", i))
 		v := []byte(fmt.Sprintf("v%.3d", i))
-		if err := batch.Put(k, v); err != nil {
+		if _, err := batch.Put(k, v); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}
@@ -32,7 +32,7 @@ func testDefaultBackend(t *testing.T, db *DB) {
 	}
 
 	i := 0
-	if err := db.Range(rev, func(key, val []byte) {
+	if err := db.Range(rev, func(key, val []byte) error {
 		k := []byte(fmt.Sprintf("k%.3d", i))
 		v := []byte(fmt.Sprintf("v%.3d", i))
 		if bytes.Compare(k, key) != 0 {
@@ -42,6 +42,7 @@ func testDefaultBackend(t *testing.T, db *DB) {
 			t.Fatalf("range: exptected key %q, got %q", v, val)
 		}
 		i++
+		return nil
 	}); err != nil {
 		t.Fatalf("range: %v", err)
 	}
@@ -85,7 +86,7 @@ func insertEntries(t *testing.T, count int, r uint64, db *DB) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("k%.3d", i))
 		v := []byte(fmt.Sprintf("v%.3d", i))
-		if err := batch.Put(k, v); err != nil {
+		if _, err := batch.Put(k, v); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}

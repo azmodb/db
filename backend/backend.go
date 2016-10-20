@@ -11,12 +11,13 @@ import (
 )
 
 type Backend interface {
-	Range(rev Revision, fn func(key []byte, value []byte)) error
+	Range(rev Revision, fn func(key []byte, value []byte) error) error
 	Batch(rev Revision) (Batch, error)
+	Last() (Revision, error)
 }
 
 type Batch interface {
-	Put(key []byte, value []byte) error
+	Put(key []byte, value []byte) (bool, error)
 	Close() error
 }
 
@@ -121,8 +122,8 @@ func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
 	return n, err
 }
 
-func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
-	return db.root.View(func(tx *btree.Tx) error {
+func (db *DB) Range(rev Revision, fn func(key, value []byte) error) error {
+	return db.root.View(func(tx *btree.Tx) (err error) {
 		meta := tx.Bucket(metaBucket).Bucket(rev[:])
 		if meta == nil {
 			return errors.New("revision not found")
@@ -144,13 +145,26 @@ func (db *DB) Range(rev Revision, fn func(key, value []byte)) error {
 				if err != nil {
 					return err
 				}
-				fn(uk, uv)
+				err = fn(uk, uv)
 			} else {
-				fn(k, v)
+				err = fn(k, v)
+			}
+			if err != nil {
+				break
 			}
 		}
+		return err
+	})
+}
+
+func (db *DB) Last() (rev Revision, err error) {
+	err = db.root.View(func(tx *btree.Tx) error {
+		c := tx.Bucket(metaBucket).Cursor()
+		k, _ := c.Last()
+		copy(rev[:], k)
 		return nil
 	})
+	return rev, err
 }
 
 func (db *DB) Batch(rev Revision) (Batch, error) {
@@ -211,7 +225,7 @@ func (b *batch) next() *entry {
 	return e
 }
 
-func (b *batch) Put(key, value []byte) (err error) {
+func (b *batch) Put(key, value []byte) (bool, error) {
 	e := b.next()
 	if b.compress {
 		e.key = snappy.Encode(nil, e.key)
@@ -237,24 +251,25 @@ func (b *batch) put(key, value []byte) (err error) {
 	return b.meta.Put(key, sum[:])
 }
 
-func (b *batch) flush(force bool) (err error) {
+func (b *batch) flush(force bool) (written bool, err error) {
 	if b.index >= b.maxEntries || b.size >= b.maxSize || force {
 		for i := 0; i < b.index; i++ {
 			e := b.entries[i]
 			if err = b.put(e.key, e.value); err != nil {
-				return err
+				return written, err
 			}
 			e.key = nil
 			e.value = nil
 		}
 		b.index = 0
 		b.size = 0
+		written = true
 	}
-	return err
+	return written, err
 }
 
 func (b *batch) Close() error {
-	if err := b.flush(true); err != nil {
+	if _, err := b.flush(true); err != nil {
 		return err
 	}
 	return b.tx.Commit()
