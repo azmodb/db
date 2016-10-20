@@ -1,3 +1,5 @@
+// Package backend implements the persistent AzmoDB backend key/value
+// database.
 package backend
 
 import (
