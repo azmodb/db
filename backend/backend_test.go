@@ -23,7 +23,7 @@ func testDefaultBackend(t *testing.T, db *DB) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("k%.3d", i))
 		v := []byte(fmt.Sprintf("v%.3d", i))
-		if _, err := batch.Put(k, v); err != nil {
+		if err := batch.Put(k, v); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}
@@ -86,7 +86,7 @@ func insertEntries(t *testing.T, count int, r uint64, db *DB) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("k%.3d", i))
 		v := []byte(fmt.Sprintf("v%.3d", i))
-		if _, err := batch.Put(k, v); err != nil {
+		if err := batch.Put(k, v); err != nil {
 			t.Fatalf("put: %v", err)
 		}
 	}

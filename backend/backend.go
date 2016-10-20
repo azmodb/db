@@ -10,17 +10,32 @@ import (
 	"github.com/golang/snappy"
 )
 
+// Backend represents a persistent AzmoDB backend.
 type Backend interface {
+	// Range performs fn on all values stored in the database at rev.
+	// If fn returns an errors the traversal is stopped and the error
+	// is returned.
 	Range(rev Revision, fn func(key []byte, value []byte) error) error
+
+	// Batch starts a new batch transaction. Starting multiple write
+	// batch transactions will cause the calls to block and be
+	// serialized until the current write batch transaction finishes.
 	Batch(rev Revision) (Batch, error)
+
+	// Last returns the last revision in the database and an error if
+	// any.
 	Last() (Revision, error)
 }
 
+// Batch returns a batch transaction on the database.
 type Batch interface {
-	Put(key []byte, value []byte) (bool, error)
+	// Put sets the value for a key in the database. Put must create a
+	// copy of the supplied key and value.
+	Put(key []byte, value []byte) error
 	Close() error
 }
 
+// Revision represents a serialized AzmoDB revision.
 type Revision [8]byte
 
 var (
@@ -31,22 +46,11 @@ var (
 	_ Backend = (*DB)(nil)
 )
 
+// Option represents a DB option function.
 type Option func(*DB) error
 
-func WithMaxBatchEntries(entries int) Option {
-	return func(db *DB) error {
-		db.maxEntries = entries
-		return nil
-	}
-}
-
-func WithMaxBatchSize(size int) Option {
-	return func(db *DB) error {
-		db.maxSize = size
-		return nil
-	}
-}
-
+// WithCompression configures the DB to use the Snappy compression on all supplied
+// values.
 func WithCompression() Option {
 	return func(db *DB) error {
 		db.compress = true
@@ -54,6 +58,25 @@ func WithCompression() Option {
 	}
 }
 
+// WithMaxBatchEntries configures the maximum batch entries.
+func WithMaxBatchEntries(entries int) Option {
+	return func(db *DB) error {
+		db.maxEntries = entries
+		return nil
+	}
+}
+
+// WithMaxBatchSize configures the maximum batch size.
+func WithMaxBatchSize(size int) Option {
+	return func(db *DB) error {
+		db.maxSize = size
+		return nil
+	}
+}
+
+// DB represents the default AzmoDB backend. DB represents a collection of buckets
+// persisted to a file on disk. All data access is performed through transactions
+// which can be obtained through the DB.
 type DB struct {
 	root       *btree.DB
 	maxEntries int
@@ -66,8 +89,18 @@ const (
 	defaultMaxBatchEntries = 256
 )
 
+// Open creates and opens a database at the given path. If the file does
+// not exist then it will be created automatically.
+//
+// Timeout is the amount of time to wait to obtain a file lock. When set
+// to zero it will wait indefinitely. This option is only available on
+// Darwin and Linux.
 func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
-	db := newDefaultDB()
+	db := &DB{
+		maxEntries: defaultMaxBatchEntries,
+		maxSize:    defaultMaxBatchSize,
+		compress:   false,
+	}
 	for _, opt := range opts {
 		if err := opt(db); err != nil {
 			return nil, err
@@ -93,17 +126,12 @@ func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 		return nil, err
 	}
 
+	//db.root = root
 	return &DB{root: root}, nil
 }
 
-func newDefaultDB() *DB {
-	return &DB{
-		maxEntries: defaultMaxBatchEntries,
-		maxSize:    defaultMaxBatchSize,
-		compress:   false,
-	}
-}
-
+// Close releases all database resources. All batch transactions must be
+// closed before closing the database.
 func (db *DB) Close() error {
 	if db == nil || db.root == nil {
 		return errors.New("backend is shut down")
@@ -114,6 +142,7 @@ func (db *DB) Close() error {
 	return err
 }
 
+// WriteTo writes the entire database to a writer.
 func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
 	err = db.root.View(func(tx *btree.Tx) error {
 		n, err = tx.WriteTo(w)
@@ -122,6 +151,8 @@ func (db *DB) WriteTo(w io.Writer) (n int64, err error) {
 	return n, err
 }
 
+// Range performs fn on all values stored in the database at rev. If fn
+// returns an errors the traversal is stopped and the error is returned.
 func (db *DB) Range(rev Revision, fn func(key, value []byte) error) error {
 	return db.root.View(func(tx *btree.Tx) (err error) {
 		meta := tx.Bucket(metaBucket).Bucket(rev[:])
@@ -147,7 +178,7 @@ func (db *DB) Range(rev Revision, fn func(key, value []byte) error) error {
 				}
 				err = fn(uk, uv)
 			} else {
-				err = fn(k, v)
+				err = fn(clone(nil, k), clone(nil, v))
 			}
 			if err != nil {
 				break
@@ -157,6 +188,7 @@ func (db *DB) Range(rev Revision, fn func(key, value []byte) error) error {
 	})
 }
 
+// Last returns the last revision in the database and an error if any.
 func (db *DB) Last() (rev Revision, err error) {
 	err = db.root.View(func(tx *btree.Tx) error {
 		c := tx.Bucket(metaBucket).Cursor()
@@ -167,6 +199,9 @@ func (db *DB) Last() (rev Revision, err error) {
 	return rev, err
 }
 
+// Batch starts a new batch transaction. Starting multiple write batch
+// transactions will cause the calls to block and be serialized until
+// the current write batch transaction finishes.
 func (db *DB) Batch(rev Revision) (Batch, error) {
 	tx, err := db.root.Begin(true)
 	if err != nil {
@@ -225,14 +260,14 @@ func (b *batch) next() *entry {
 	return e
 }
 
-func (b *batch) Put(key, value []byte) (bool, error) {
+func (b *batch) Put(key, value []byte) error {
 	e := b.next()
 	if b.compress {
 		e.key = snappy.Encode(nil, e.key)
 		e.value = snappy.Encode(nil, e.value)
 	} else {
-		e.key = key
-		e.value = value
+		e.key = clone(nil, key)
+		e.value = clone(nil, value)
 	}
 	b.size += len(key) + len(value)
 	b.index++
@@ -251,26 +286,35 @@ func (b *batch) put(key, value []byte) (err error) {
 	return b.meta.Put(key, sum[:])
 }
 
-func (b *batch) flush(force bool) (written bool, err error) {
+func (b *batch) flush(force bool) (err error) {
 	if b.index >= b.maxEntries || b.size >= b.maxSize || force {
 		for i := 0; i < b.index; i++ {
 			e := b.entries[i]
 			if err = b.put(e.key, e.value); err != nil {
-				return written, err
+				return err
 			}
 			e.key = nil
 			e.value = nil
 		}
 		b.index = 0
 		b.size = 0
-		written = true
 	}
-	return written, err
+	return err
 }
 
 func (b *batch) Close() error {
-	if _, err := b.flush(true); err != nil {
+	if err := b.flush(true); err != nil {
 		return err
 	}
 	return b.tx.Commit()
+}
+
+func clone(dst, src []byte) []byte {
+	n := len(src)
+	if len(dst) < n {
+		dst = make([]byte, n)
+	}
+	dst = dst[:n]
+	copy(dst, src)
+	return dst
 }
