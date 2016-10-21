@@ -281,7 +281,7 @@ func (b *batch) flush(force bool) (err error) {
 
 func (b *batch) Close() error {
 	if err := b.flush(true); err != nil {
-		//		b.tx.Rollback()
+		b.tx.Rollback()
 		return err
 	}
 	return b.tx.Commit()
