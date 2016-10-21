@@ -34,6 +34,8 @@ type Batch interface {
 	// Put sets the value for a key in the database. Put must create a
 	// copy of the supplied key and value.
 	Put(key []byte, value []byte) error
+
+	// Close closes the batch transaction.
 	Close() error
 }
 
@@ -50,15 +52,6 @@ var (
 
 // Option represents a DB option function.
 type Option func(*DB) error
-
-// WithCompression configures the DB to use the Snappy compression on all supplied
-// values.
-func WithCompression() Option {
-	return func(db *DB) error {
-		db.compress = true
-		return nil
-	}
-}
 
 // WithMaxBatchEntries configures the maximum batch entries.
 func WithMaxBatchEntries(entries int) Option {
@@ -83,7 +76,6 @@ type DB struct {
 	root       *btree.DB
 	maxEntries int
 	maxSize    int
-	compress   bool
 }
 
 const (
@@ -101,7 +93,6 @@ func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 	db := &DB{
 		maxEntries: defaultMaxBatchEntries,
 		maxSize:    defaultMaxBatchSize,
-		compress:   false,
 	}
 	for _, opt := range opts {
 		if err := opt(db); err != nil {
@@ -128,8 +119,8 @@ func Open(path string, timeout time.Duration, opts ...Option) (*DB, error) {
 		return nil, err
 	}
 
-	//db.root = root
-	return &DB{root: root}, nil
+	db.root = root
+	return db, nil
 }
 
 // Close releases all database resources. All batch transactions must be
@@ -169,20 +160,12 @@ func (db *DB) Range(rev Revision, fn func(key, value []byte) error) error {
 			if v == nil {
 				panic("cannot find value for key: " + string(k))
 			}
-			if db.compress {
-				uk, err := snappy.Decode(nil, k)
-				if err != nil {
-					return err
-				}
-				uv, err := snappy.Decode(nil, v)
-				if err != nil {
-					return err
-				}
-				err = fn(uk, uv)
-			} else {
-				err = fn(clone(nil, k), clone(nil, v))
-			}
+			safeKey := clone(nil, k)
+			safeValue, err := snappy.Decode(nil, v)
 			if err != nil {
+				return err
+			}
+			if err = fn(safeKey, safeValue); err != nil {
 				break
 			}
 		}
@@ -216,14 +199,12 @@ func (db *DB) Batch(rev Revision) (Batch, error) {
 		return nil, err
 	}
 	return &batch{
-		entries:    make([]*entry, 12),
+		entries:    make([]*entry, db.maxEntries),
 		maxEntries: db.maxEntries,
 		maxSize:    db.maxSize,
-		compress:   db.compress,
-
-		meta: meta,
-		data: data,
-		tx:   tx,
+		meta:       meta,
+		data:       data,
+		tx:         tx,
 	}, nil
 }
 
@@ -246,7 +227,6 @@ type batch struct {
 	size       int
 	maxEntries int
 	maxSize    int
-	compress   bool
 
 	meta *btree.Bucket
 	data *btree.Bucket
@@ -264,13 +244,8 @@ func (b *batch) next() *entry {
 
 func (b *batch) Put(key, value []byte) error {
 	e := b.next()
-	if b.compress {
-		e.key = snappy.Encode(nil, e.key)
-		e.value = snappy.Encode(nil, e.value)
-	} else {
-		e.key = clone(nil, key)
-		e.value = clone(nil, value)
-	}
+	e.key = clone(nil, key)
+	e.value = snappy.Encode(nil, value)
 	b.size += len(key) + len(value)
 	b.index++
 
@@ -306,6 +281,7 @@ func (b *batch) flush(force bool) (err error) {
 
 func (b *batch) Close() error {
 	if err := b.flush(true); err != nil {
+		//		b.tx.Rollback()
 		return err
 	}
 	return b.tx.Commit()

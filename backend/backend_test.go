@@ -52,26 +52,18 @@ func testDefaultBackend(t *testing.T, db *DB) {
 }
 
 func TestDefaultBackend(t *testing.T) {
-	dbCompress, err := Open("test_default_compress_backend.db", 0, WithCompression())
+	db, err := Open("test_default_backend.db", 0)
 	if err != nil {
 		t.Fatalf("open default database: %v", err)
 	}
 	defer func() {
-		dbCompress.Close()
-		os.RemoveAll("test_default_compress_backend.db")
-	}()
-
-	dbNoCompress, err := Open("test_default_backend.db", 0)
-	if err != nil {
-		t.Fatalf("open default database: %v", err)
-	}
-	defer func() {
-		dbNoCompress.Close()
+		if err := db.Close(); err != nil {
+			t.Fatalf("close default database: %v", err)
+		}
 		os.RemoveAll("test_default_backend.db")
 	}()
 
-	testDefaultBackend(t, dbNoCompress)
-	testDefaultBackend(t, dbCompress)
+	testDefaultBackend(t, db)
 }
 
 func insertEntries(t *testing.T, count int, r uint64, db *DB) {
