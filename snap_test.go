@@ -59,11 +59,11 @@ func TestBasicSnapshot(t *testing.T) {
 		os.RemoveAll("test_backend.db")
 	}()
 
-	if err := db.Snapshot(b); err != nil {
+	if _, err := db.snapshot(b); err != nil {
 		t.Fatalf("basic snapshot: %v", err)
 	}
 
-	ndb, err := Reload(b)
+	ndb, err := reload(b)
 	if err != nil {
 		t.Fatalf("reload database: %v", err)
 	}

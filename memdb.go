@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/azmodb/db/backend"
@@ -59,8 +60,9 @@ func (e perror) Error() string { return string(e) }
 // All access is performed through a transaction which can be obtained
 // through the database.
 type DB struct {
-	writer sync.Mutex // exclusive writer transaction
-	tree   unsafe.Pointer
+	writer  sync.Mutex // exclusive writer transaction
+	tree    unsafe.Pointer
+	backend backend.Backend
 }
 
 type tree struct {
@@ -75,12 +77,27 @@ func newDB(t *tree) *DB {
 	return &DB{tree: unsafe.Pointer(t)}
 }
 
+// Load reloads the immutable, consistent, in-memory key/value database
+// from the underlying backend.
+func Load(path string, timeout time.Duration, opts ...backend.Option) (*DB, error) {
+	backend, err := backend.Open(path, timeout, opts...)
+	if err != nil {
+		return nil, err
+	}
+	db, err := reload(backend)
+	if err != nil {
+		return nil, err
+	}
+	db.backend = backend
+	return db, nil
+}
+
 // New returns an immutable, consistent, in-memory key/value database.
 func New() *DB { return newDB(nil) }
 
-// Reload reloads the immutable, consistent, in-memory key/value database
+// reload reloads the immutable, consistent, in-memory key/value database
 // from the underlying backend.
-func Reload(backend backend.Backend) (*DB, error) {
+func reload(backend backend.Backend) (*DB, error) {
 	rev, err := backend.Last()
 	if err != nil {
 		return nil, err
@@ -119,7 +136,11 @@ func Reload(backend backend.Backend) (*DB, error) {
 
 // Snapshot writes the entire in-memory database to the underlying
 // backend.
-func (db *DB) Snapshot(backend backend.Backend) error {
+func (db *DB) Snapshot() (int64, error) {
+	return db.snapshot(db.backend)
+}
+
+func (db *DB) snapshot(backend backend.Backend) (int64, error) {
 	tree := db.load()
 
 	rev := [8]byte{}
@@ -127,7 +148,7 @@ func (db *DB) Snapshot(backend backend.Backend) error {
 
 	batch, err := backend.Batch(rev)
 	if err != nil {
-		return err
+		return tree.rev, err
 	}
 
 	buf := newBuffer(nil)
@@ -146,9 +167,9 @@ func (db *DB) Snapshot(backend backend.Backend) error {
 	})
 	if err != nil {
 		batch.Close()
-		return err
+		return tree.rev, err
 	}
-	return batch.Close()
+	return tree.rev, batch.Close()
 }
 
 func (db *DB) store(t *tree) {
