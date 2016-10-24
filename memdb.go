@@ -27,28 +27,28 @@ import (
 )
 
 const (
-	// errRevisionNotFound is returned when trying to access a revision
+	// ErrRevisionNotFound is returned when trying to access a revision
 	// that has not been created.
-	errRevisionNotFound = perror("revision not found")
+	ErrRevisionNotFound = perror("revision not found")
 
-	// errKeyNotFound is returned when trying to access a key that has
+	// ErrKeyNotFound is returned when trying to access a key that has
 	// not been created.
-	errKeyNotFound = perror("key not found")
+	ErrKeyNotFound = perror("key not found")
 
-	// errIncompatibleValue is returned when trying create or delete a
+	// ErrIncompatibleValue is returned when trying create or delete a
 	// value on an imcompatible key.
-	errIncompatibleValue = perror("incompatible value")
+	ErrIncompatibleValue = perror("incompatible value")
 
-	// pairDeleted is the error returned by a watcher when the
+	// PairDeleted is the error returned by a watcher when the
 	// underlying is deleted.
-	pairDeleted = perror("key/value pair deleted")
+	PairDeleted = perror("key/value pair deleted")
 
-	// notifierCanceled is the error returned when the watcher is
+	// NotifierCanceled is the error returned when the watcher is
 	// canceled.
-	notifierCanceled = perror("watcher shut down")
+	NotifierCanceled = perror("notifier is shut down")
 
-	// errInvertedRange is returned when a inverted range is supplied.
-	errInvertedRange = perror("inverted range")
+	// ErrInvertedRange is returned when a inverted range is supplied.
+	ErrInvertedRange = perror("inverted range")
 )
 
 type perror string
@@ -176,9 +176,9 @@ func (db *DB) Get(key []byte, rev int64, equal bool) (interface{}, int64, int64,
 		if found {
 			return b.Data, b.Rev, tree.rev, nil
 		}
-		return nil, 0, tree.rev, errRevisionNotFound
+		return nil, 0, tree.rev, ErrRevisionNotFound
 	}
-	return nil, 0, tree.rev, errKeyNotFound
+	return nil, 0, tree.rev, ErrKeyNotFound
 }
 
 func lookup(p *pair, rev int64, equal bool) (block, bool) {
@@ -236,7 +236,7 @@ func (db *DB) get(tree *tree, key []byte, rev int64) (*Notifier, int64, error) {
 func (db *DB) Range(from, to []byte, rev int64, limit int32) (*Notifier, int64, error) {
 	tree := db.load()
 	if compare(from, to) > 0 {
-		return nil, tree.rev, errInvertedRange
+		return nil, tree.rev, ErrInvertedRange
 	}
 
 	if from != nil && to == nil { // simulate get request with equal == false
@@ -280,7 +280,7 @@ func (db *DB) Watch(key []byte) (*Notifier, int64, error) {
 		p := elem.(*pair)
 		return p.stream.Register(), tree.rev, nil
 	}
-	return nil, tree.rev, errKeyNotFound
+	return nil, tree.rev, ErrKeyNotFound
 }
 
 // Txn starts a new batch transaction. Only one batch transaction can
@@ -319,7 +319,7 @@ func (tx *Txn) Update(key []byte, up Updater, tombstone bool) (int64, error) {
 		last := p.last().Data
 		data := up(last)
 		if !typeEqual(last, data) {
-			return tx.rev, errIncompatibleValue
+			return tx.rev, ErrIncompatibleValue
 		}
 		p = p.insert(data, rev, tombstone)
 	} else {

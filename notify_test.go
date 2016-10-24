@@ -20,9 +20,9 @@ func TestBasicNotifier(t *testing.T) {
 		i := 0
 		for ev := range n.Recv() {
 			if ev.Err() != nil {
-				if i != count || ev.Err() != notifierCanceled {
+				if i != count || ev.Err() != NotifierCanceled {
 					t.Fatalf("notifier: expected count %d and error %v, have %d %v",
-						count, notifierCanceled, i, ev.Err())
+						count, NotifierCanceled, i, ev.Err())
 				}
 				break
 			}

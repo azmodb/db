@@ -91,7 +91,7 @@ func (n *Notifier) Cancel() {
 		return
 	}
 	n.cancel(n)
-	n.in <- Event{err: notifierCanceled}
+	n.in <- Event{err: NotifierCanceled}
 	n.shutdown()
 	n.mu.Unlock()
 }
@@ -178,7 +178,7 @@ func (s *stream) Cancel() {
 
 	for _, n := range s.notifiers {
 		delete(s.notifiers, n.id)
-		n.close(pairDeleted)
+		n.close(PairDeleted)
 	}
 	s.shutdown()
 	s.mu.Unlock()
